@@ -16,11 +16,13 @@ model Song {
   attributeType String  // "All Types", "Cool", "Cute", "Passion"
   originalIdols String  // Original idol string for verification
   howToObtain  String?  // How to obtain the song
+  unitId       Int?     // Reference to unit if this song is performed by a unit
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   
   // Relations
   songIdols SongIdol[]
+  unit      Unit?      @relation(fields: [unitId], references: [id])
 
   @@map("songs")
 }
@@ -32,9 +34,37 @@ model Idol {
   updatedAt DateTime @updatedAt
   
   // Relations
-  songIdols SongIdol[]
+  songIdols   SongIdol[]
+  unitMembers UnitMember[]
 
   @@map("idols")
+}
+
+model Unit {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique  // Unit name like "mirror", "TRUE COLORS"
+  url       String?  // URL to the unit page for scraping
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  songs       Song[]
+  unitMembers UnitMember[]
+
+  @@map("units")
+}
+
+// Junction table for Unit-Idol relationships
+model UnitMember {
+  id     Int @id @default(autoincrement())
+  unitId Int
+  idolId Int
+  
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  idol Idol @relation(fields: [idolId], references: [id], onDelete: Cascade)
+  
+  @@unique([unitId, idolId])
+  @@map("unit_members")
 }
 
 // Junction table for Song-Idol relationships

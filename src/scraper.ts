@@ -7,14 +7,23 @@ export interface ScrapedSong {
   howToObtain?: string;   // How to obtain the song
   originalIdols: string;  // Original idol string for verification
   idols: string[];        // Array of idol names (comma and "and" separated in original)
+  unitName?: string;      // Unit name if this is a unit song
+  unitUrl?: string;       // Unit page URL for scraping
 }
 
 export interface ScrapedIdol {
   name: string;
 }
 
+export interface ScrapedUnit {
+  name: string;
+  url: string;
+  members: string[];
+}
+
 export class CGSSScraper {
   private userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+  private baseUrl = 'https://project-imas.wiki';
   
   async fetchPage(url: string): Promise<string> {
     try {
@@ -89,7 +98,129 @@ export class CGSSScraper {
     return songs;
   }
 
-  parseSongTable($: cheerio.CheerioAPI, $table: cheerio.Cheerio<cheerio.Element>, headers: string[]): ScrapedSong[] {
+  isUnitLink(element: cheerio.Cheerio<any>): boolean {
+    const href = element.attr('href') || '';
+    const text = element.text().trim();
+    
+    // Check if it's a unit page link (groups typically have their own pages)
+    const isUnitPage = href.includes('/') && !href.includes('#') && 
+                      !href.includes('Idol') && text.length > 3;
+    
+    // Additional checks for common unit patterns
+    const unitPatterns = [
+      'mirror', 'TRUE COLORS', 'VelvetRose', 'Fascinate', 'Cute', 'Cool', 'Passion',
+      'O-Ku-Ri-Mo-No', 'Sunday!', 'Mujuuryoku Shuttle', 'Babel', 'cosmic cosmic',
+      'Mirror Ball Love', 'Unlock Starbeat'
+    ];
+    
+    const isKnownUnit = unitPatterns.some(pattern => 
+      text.toLowerCase().includes(pattern.toLowerCase())
+    );
+    
+    return isUnitPage || isKnownUnit;
+  }
+
+  async scrapeUnitPage(url: string): Promise<ScrapedUnit | null> {
+    try {
+      console.log(`🎭 Scraping unit page: ${url}`);
+      const html = await this.fetchPage(url);
+      const $ = cheerio.load(html);
+      
+      // Get unit name from page title or first heading
+      let unitName = '';
+      const titleElement = $('h1').first();
+      if (titleElement.length) {
+        unitName = titleElement.text().trim();
+      } else {
+        // Fallback to extracting from URL
+        const urlParts = url.split('/');
+        unitName = urlParts[urlParts.length - 1].replace(/_/g, ' ');
+      }
+      
+      // Look for unit data table or member information
+      const members: string[] = [];
+      
+      // Method 1: Look for "General Unit Data" or similar tables
+      $('table').each((i, table) => {
+        const $table = $(table);
+        const tableText = $table.text().toLowerCase();
+        
+        if (tableText.includes('members') || tableText.includes('original name')) {
+          $table.find('tr').each((j, row) => {
+            const $row = $(row);
+            const rowText = $row.text().toLowerCase();
+            
+            if (rowText.includes('members') || rowText.includes('member')) {
+              // Find links in this row
+              $row.find('a').each((k, link) => {
+                const memberName = $(link).text().trim();
+                if (memberName && memberName.length > 2 && !memberName.includes('http')) {
+                  members.push(memberName);
+                }
+              });
+              
+              // Also try parsing text if no links
+              if (members.length === 0) {
+                const memberText = $row.find('td').last().text().trim();
+                if (memberText && memberText.length > 5) {
+                  const parsedMembers = memberText
+                    .split(/,|\sand\s/i)
+                    .map(m => m.trim())
+                    .filter(m => m && m.length > 2);
+                  members.push(...parsedMembers);
+                }
+              }
+            }
+          });
+        }
+      });
+      
+      // Method 2: Look for member links in the page content
+      if (members.length === 0) {
+        $('a').each((i, link) => {
+          const href = $(link).attr('href') || '';
+          const text = $(link).text().trim();
+          
+          // Check if this looks like an idol page link
+          if (href.includes('/') && text.length > 2 && text.length < 30 &&
+              !text.includes('http') && !text.includes('@') && 
+              !href.includes('#') && !href.includes('Category:')) {
+            
+            // Additional filtering for common idol name patterns
+            const hasJapaneseName = /[a-zA-Z]+ [a-zA-Z]+/.test(text) || 
+                                  text.includes('Hisakawa') || text.includes('Sakurai');
+            
+            if (hasJapaneseName && !members.includes(text)) {
+              members.push(text);
+            }
+          }
+        });
+        
+        // Limit to reasonable number of members (units typically have 2-5 members)
+        if (members.length > 10) {
+          members.splice(5); // Keep only first 5
+        }
+      }
+      
+      if (unitName && members.length > 0) {
+        console.log(`✅ Found unit: ${unitName} with ${members.length} members: ${members.join(', ')}`);
+        return {
+          name: unitName,
+          url,
+          members
+        };
+      } else {
+        console.log(`⚠️ Could not find unit data in page: ${url}`);
+        return null;
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to scrape unit page ${url}:`, error);
+      return null;
+    }
+  }
+
+  parseSongTable($: cheerio.CheerioAPI, $table: cheerio.Cheerio<any>, headers: string[]): ScrapedSong[] {
     const songs: ScrapedSong[] = [];
     
     // Try to intelligently detect column positions
@@ -163,44 +294,68 @@ export class CGSSScraper {
       const idolsCell = idolsIndex < cells.length ? $(cells[idolsIndex]) : null;
       const howToObtain = obtainIndex < cells.length ? $(cells[obtainIndex]).text().trim() : '';
       
-      // Parse idols - handle both links and plain text
+      // Parse idols - handle both links and plain text, detect units
       const idols: string[] = [];
       let originalIdolsText = '';
+      let unitName: string | undefined;
+      let unitUrl: string | undefined;
       
       if (idolsCell) {
         // Get original text for verification
         originalIdolsText = idolsCell.text().trim();
         
-        // First try to get text from links
-        idolsCell.find('a').each((i, link) => {
-          const idolName = $(link).text().trim();
-          if (idolName && idolName.length > 1) idols.push(idolName);
-        });
+        // Check for unit links first
+        const links = idolsCell.find('a');
+        if (links.length === 1) {
+          const singleLink = links.first();
+          if (this.isUnitLink(singleLink)) {
+            unitName = singleLink.text().trim();
+            unitUrl = this.baseUrl + (singleLink.attr('href') || '');
+            console.log(`🎭 Detected unit link: ${unitName} -> ${unitUrl}`);
+          }
+        }
         
-        // If no links found, parse plain text and split by comma and "and"
-        if (idols.length === 0) {
-          const plainText = originalIdolsText;
-          if (plainText && plainText.length > 1) {
-            // Split by comma and "and", clean up names
-            const names = plainText
-              .split(/,|\sand\s/i) // Split by comma or " and " (case insensitive)
-              .map(n => n.trim())
-              .filter(n => n && n.length > 1);
-            idols.push(...names);
+        // If not a unit, parse individual idols
+        if (!unitName) {
+          // First try to get text from links
+          idolsCell.find('a').each((i, link) => {
+            const idolName = $(link).text().trim();
+            if (idolName && idolName.length > 1) idols.push(idolName);
+          });
+          
+          // If no links found, parse plain text and split by comma and "and"
+          if (idols.length === 0) {
+            const plainText = originalIdolsText;
+            if (plainText && plainText.length > 1) {
+              // Split by comma and "and", clean up names
+              const names = plainText
+                .split(/,|\sand\s/i) // Split by comma or " and " (case insensitive)
+                .map(n => n.trim())
+                .filter(n => n && n.length > 1);
+              idols.push(...names);
+            }
           }
         }
       }
 
-      if (name && name.length > 1 && attributeType && idols.length > 0) {
-        songs.push({
+      if (name && name.length > 1 && attributeType && (idols.length > 0 || unitName)) {
+        const song: ScrapedSong = {
           name,
           attributeType,
           howToObtain: howToObtain || undefined,
           originalIdols: originalIdolsText,
-          idols,
-        });
+          idols: unitName ? [] : idols, // Empty idols if it's a unit song
+          unitName,
+          unitUrl,
+        };
         
-        console.log(`  ➤ ${name} (${attributeType}) - ${idols.length} idols`);
+        songs.push(song);
+        
+        if (unitName) {
+          console.log(`  ➤ ${name} (${attributeType}) - Unit: ${unitName}`);
+        } else {
+          console.log(`  ➤ ${name} (${attributeType}) - ${idols.length} idols`);
+        }
       }
     });
 
