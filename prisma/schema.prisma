@@ -1,0 +1,51 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Song {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique // Song Name like "Aozora Yell", "Stage Bye Stage"
+  attributeType String  // "All Types", "Cool", "Cute", "Passion"
+  originalIdols String  // Original idol string for verification
+  howToObtain  String?  // How to obtain the song
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relations
+  songIdols SongIdol[]
+
+  @@map("songs")
+}
+
+model Idol {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  songIdols SongIdol[]
+
+  @@map("idols")
+}
+
+// Junction table for Song-Idol relationships
+model SongIdol {
+  id     Int @id @default(autoincrement())
+  songId Int
+  idolId Int
+  
+  song Song @relation(fields: [songId], references: [id], onDelete: Cascade)
+  idol Idol @relation(fields: [idolId], references: [id], onDelete: Cascade)
+  
+  @@unique([songId, idolId])
+  @@map("song_idols")
+} 
