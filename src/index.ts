@@ -38,6 +38,8 @@ async function main() {
 
     const scrapedSongs = await scraper.scrapeSongs(wikiUrl);
     console.log(`📋 Found ${scrapedSongs.length} songs on the wiki page`);
+    const scrapedUnits = await scraper.scrapeUnits(wikiUrl);
+    console.log(`📋 Found ${scrapedUnits.length} units on the wiki page`);
 
     // Process scraped songs with unit handling
     if (scrapedSongs.length > 0) {

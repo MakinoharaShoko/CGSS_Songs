@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
+import { DatabaseService } from './database-service.js';
 
 export interface ScrapedSong {
   name: string;           // Song Name
@@ -19,11 +20,16 @@ export interface ScrapedUnit {
   name: string;
   url: string;
   members: string[];
+  type?: string;          // Unit type: Cute, Cool, Passion, Mixed
+  imageSongs?: string[];  // Array of image songs
+  debut?: string;         // Debut information
 }
 
 export class CGSSScraper {
   private userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
   private baseUrl = 'https://project-imas.wiki';
+  private unitsMap: Map<string, ScrapedUnit> = new Map(); // All units from the page
+  private db: DatabaseService = new DatabaseService();
   
   async fetchPage(url: string): Promise<string> {
     try {
@@ -45,12 +51,126 @@ export class CGSSScraper {
     } catch (error) {
       console.error(`Failed to fetch ${url}:`, error);
       throw error;
-    }
+        }
   }
 
+  // Extract units from the main page Units table
+  parseUnitsTable(html: string): ScrapedUnit[] {
+    const $ = cheerio.load(html);
+    
+    // Find the Units table by looking for the specific table structure
+    console.log('🔍 Searching for Units table...');
+    let foundUnitsTable = false;
+    
+    $('table').each((tableIndex, table) => {
+      const $table = $(table);
+      
+      // Check if this is the Units table by looking for the header content
+      const tableText = $table.text();
+      console.log(`🔍 Table ${tableIndex}: ${tableText.substring(0, 100)}...`);
+      
+      if (tableText.includes('Cinderella Girls Starlight Stage Units') && 
+          tableText.includes('Unit Name (Romaji)') &&
+          tableText.includes('Members')) {
+        
+        foundUnitsTable = true;
+        console.log('📋 Found Units table, parsing...');
+        
+        // Parse tbody rows only (skip thead)
+        const rows = $table.find('tbody tr');
+        console.log(`📋 Found ${rows.length} data rows in Units table`);
+        
+        $table.find('tbody tr').each((rowIndex, row) => {
+          const $row = $(row);
+          const cells = $row.find('td');
+          
+          if (cells.length >= 6) { // Should have 6 columns
+            const unitNameRomaji = $(cells[0]).find('a').text().trim() || $(cells[0]).text().trim();
+            const unitNameJp = $(cells[1]).text().trim();
+            const unitType = $(cells[2]).text().trim();
+            const membersCell = $(cells[3]);
+            const songsCell = $(cells[4]);
+            const debutCell = $(cells[5]);
+            
+            // Extract members from links in the members cell
+            let members: string[] = [];
+            
+            // Extract member names from links
+            membersCell.find('a').each((i, link) => {
+              const memberName = $(link).text().trim();
+              if (memberName && memberName.length > 1) {
+                members.push(memberName);
+              }
+            });
+            
+            // If no links found, try parsing text content
+            if (members.length === 0) {
+              const memberText = membersCell.text().trim();
+              if (memberText && memberText.length > 3) {
+                // Parse member names from text
+                members = memberText
+                  .split(/,\s*|\s+and\s+/i) // Split by comma or " and " (case insensitive)
+                  .map(name => name.trim())
+                  .filter(name => name && name.length > 1 && !name.includes('http') && !name.includes('TBA'));
+              }
+            }
+            
+            // Extract image songs
+            const imageSongs: string[] = [];
+            songsCell.find('a').each((i, link) => {
+              const songName = $(link).text().trim();
+              if (songName && songName.length > 1 && !songName.includes('http')) {
+                imageSongs.push(songName);
+              }
+            });
+            
+            const debut = debutCell.text().trim();
+            
+            if (unitNameRomaji && members.length > 0) {
+              const unit: ScrapedUnit = {
+                name: unitNameRomaji,
+                url: '', // We have all info here, no need for external URL
+                members,
+                type: unitType || undefined,
+                imageSongs: imageSongs.length > 0 ? imageSongs : undefined,
+                debut: debut || undefined
+              };
+              
+              // Store unit with exact name as key
+              this.unitsMap.set(unitNameRomaji, unit);
+              
+              // Also store by Japanese name if different
+              if (unitNameJp && unitNameJp !== unitNameRomaji) {
+                this.unitsMap.set(unitNameJp, unit);
+                console.log(`✅ Found unit: ${unitNameRomaji} (also as: ${unitNameJp}) - ${members.length} members: ${members.join(', ')}`);
+              } else {
+                console.log(`✅ Found unit: ${unitNameRomaji} - ${members.length} members: ${members.join(', ')}`);
+              }
+            } else {
+              console.log(`⚠️ Skipped unit row: ${unitNameRomaji} (${members.length} members)`);
+            }
+          }
+        });
+        
+        console.log(`📦 Total ${this.unitsMap.size} units found from table`);
+        return false; // Break out of each loop
+      }
+    });
+    
+    if (!foundUnitsTable) {
+      console.log('❌ Units table not found!');
+    }
+    
+    // Return all units found (could be empty if table not found)
+    return Array.from(this.unitsMap.values());
+  }
+  
   findSongTables(html: string): ScrapedSong[] {
     const $ = cheerio.load(html);
     const songs: ScrapedSong[] = [];
+
+    // First, parse the Units table to cache all unit information
+    this.parseUnitsTable(html);
 
     // Find all tables on the page
     $('table').each((tableIndex, table) => {
@@ -68,6 +188,11 @@ export class CGSSScraper {
                            headers.some(h => h.includes('Songs')) ||
                            headers.some(h => h.includes('Solo Songs')) ||
                            headers.some(h => h.includes('MASTER'));
+      
+      // Skip the Units table - we already processed it
+      if (headerText.includes('cinderella girls starlight stage units')) {
+        return;
+      }
       
       // Also check table content for song patterns
       let hasAttributeInfo = false;
@@ -94,6 +219,23 @@ export class CGSSScraper {
         }
       }
     });
+
+    // Statistics
+    const totalSongs = songs.length;
+    const unitSongs = songs.filter(s => s.unitName).length;
+    const resolvedUnitSongs = songs.filter(s => s.unitName && s.idols.length > 0).length;
+    const unresolvedUnitSongs = unitSongs - resolvedUnitSongs;
+    
+    console.log(`\n📊 Parsing Summary:`);
+    console.log(`   Total songs: ${totalSongs}`);
+    console.log(`   Unit songs: ${unitSongs}`);
+    console.log(`   Resolved from cache/title: ${resolvedUnitSongs}`);
+    console.log(`   Need external scraping: ${unresolvedUnitSongs}`);
+    if (unresolvedUnitSongs > 0) {
+      console.log(`   ⚠️  ${unresolvedUnitSongs} unit songs still need external scraping`);
+    } else {
+      console.log(`   ✅ All unit songs resolved from page content!`);
+    }
 
     return songs;
   }
@@ -122,11 +264,11 @@ export class CGSSScraper {
 
   async scrapeUnitPage(url: string): Promise<ScrapedUnit | null> {
     try {
-      console.log(`🎭 Scraping unit page: ${url}`);
+      console.log(`🎭 Fallback: Scraping external unit page: ${url}`);
       const html = await this.fetchPage(url);
       const $ = cheerio.load(html);
       
-      // Get unit name from page title or first heading
+      // Get unit name from page title
       let unitName = '';
       const titleElement = $('h1').first();
       if (titleElement.length) {
@@ -137,70 +279,25 @@ export class CGSSScraper {
         unitName = urlParts[urlParts.length - 1].replace(/_/g, ' ');
       }
       
-      // Look for unit data table or member information
+      // Find the Members row in the table and extract member links
       const members: string[] = [];
       
-      // Method 1: Look for "General Unit Data" or similar tables
-      $('table').each((i, table) => {
-        const $table = $(table);
-        const tableText = $table.text().toLowerCase();
+      // Look for table rows with "Members" label
+      $('table tr').each((i, row) => {
+        const $row = $(row);
+        const firstCell = $row.find('td').first();
         
-        if (tableText.includes('members') || tableText.includes('original name')) {
-          $table.find('tr').each((j, row) => {
-            const $row = $(row);
-            const rowText = $row.text().toLowerCase();
-            
-            if (rowText.includes('members') || rowText.includes('member')) {
-              // Find links in this row
-              $row.find('a').each((k, link) => {
-                const memberName = $(link).text().trim();
-                if (memberName && memberName.length > 2 && !memberName.includes('http')) {
-                  members.push(memberName);
-                }
-              });
-              
-              // Also try parsing text if no links
-              if (members.length === 0) {
-                const memberText = $row.find('td').last().text().trim();
-                if (memberText && memberText.length > 5) {
-                  const parsedMembers = memberText
-                    .split(/,|\sand\s/i)
-                    .map(m => m.trim())
-                    .filter(m => m && m.length > 2);
-                  members.push(...parsedMembers);
-                }
-              }
+        if (firstCell.text().toLowerCase().includes('members')) {
+          // Found the Members row, extract links from the second cell
+          const secondCell = $row.find('td').eq(1);
+          secondCell.find('a').each((j, link) => {
+            const memberName = $(link).text().trim();
+            if (memberName && memberName.length > 1) {
+              members.push(memberName);
             }
           });
         }
       });
-      
-      // Method 2: Look for member links in the page content
-      if (members.length === 0) {
-        $('a').each((i, link) => {
-          const href = $(link).attr('href') || '';
-          const text = $(link).text().trim();
-          
-          // Check if this looks like an idol page link
-          if (href.includes('/') && text.length > 2 && text.length < 30 &&
-              !text.includes('http') && !text.includes('@') && 
-              !href.includes('#') && !href.includes('Category:')) {
-            
-            // Additional filtering for common idol name patterns
-            const hasJapaneseName = /[a-zA-Z]+ [a-zA-Z]+/.test(text) || 
-                                  text.includes('Hisakawa') || text.includes('Sakurai');
-            
-            if (hasJapaneseName && !members.includes(text)) {
-              members.push(text);
-            }
-          }
-        });
-        
-        // Limit to reasonable number of members (units typically have 2-5 members)
-        if (members.length > 10) {
-          members.splice(5); // Keep only first 5
-        }
-      }
       
       if (unitName && members.length > 0) {
         console.log(`✅ Found unit: ${unitName} with ${members.length} members: ${members.join(', ')}`);
@@ -299,6 +396,7 @@ export class CGSSScraper {
       let originalIdolsText = '';
       let unitName: string | undefined;
       let unitUrl: string | undefined;
+      let foundUnit: ScrapedUnit | null = null;
       
       if (idolsCell) {
         // Get original text for verification
@@ -308,10 +406,35 @@ export class CGSSScraper {
         const links = idolsCell.find('a');
         if (links.length === 1) {
           const singleLink = links.first();
-          if (this.isUnitLink(singleLink)) {
+                    if (this.isUnitLink(singleLink)) {
             unitName = singleLink.text().trim();
             unitUrl = this.baseUrl + (singleLink.attr('href') || '');
-            console.log(`🎭 Detected unit link: ${unitName} -> ${unitUrl}`);
+            
+            // Look up unit directly from the units table
+            foundUnit = this.unitsMap.get(unitName) || null;
+            
+            // If exact match fails, try fuzzy matching
+            if (!foundUnit) {
+              for (const [key, unit] of this.unitsMap.entries()) {
+                // Try case-insensitive match
+                if (key.toLowerCase() === unitName.toLowerCase()) {
+                  foundUnit = unit;
+                  break;
+                }
+                // Try partial match (unit name contains or is contained in link text)
+                if (key.toLowerCase().includes(unitName.toLowerCase()) || 
+                    unitName.toLowerCase().includes(key.toLowerCase())) {
+                  foundUnit = unit;
+                  break;
+                }
+              }
+            }
+            
+            if (foundUnit) {
+              console.log(`🎭 Found unit: ${unitName} (${foundUnit.members.length} members: ${foundUnit.members.join(', ')})`);
+            } else {
+              console.log(`🎭 Unit not found in table: ${unitName}`);
+            }
           }
         }
         
@@ -344,7 +467,7 @@ export class CGSSScraper {
           attributeType,
           howToObtain: howToObtain || undefined,
           originalIdols: originalIdolsText,
-          idols: unitName ? [] : idols, // Empty idols if it's a unit song
+          idols: unitName ? (foundUnit?.members || []) : idols, // Use cached unit members if available
           unitName,
           unitUrl,
         };
@@ -352,7 +475,11 @@ export class CGSSScraper {
         songs.push(song);
         
         if (unitName) {
-          console.log(`  ➤ ${name} (${attributeType}) - Unit: ${unitName}`);
+          if (foundUnit) {
+            console.log(`  ➤ ${name} (${attributeType}) - Unit: ${unitName} [${foundUnit.members.length} members - RESOLVED]`);
+          } else {
+            console.log(`  ➤ ${name} (${attributeType}) - Unit: ${unitName} [NEEDS EXTERNAL SCRAPING]`);
+          }
         } else {
           console.log(`  ➤ ${name} (${attributeType}) - ${idols.length} idols`);
         }
@@ -360,6 +487,20 @@ export class CGSSScraper {
     });
 
     return songs;
+  }
+
+  async scrapeUnits(url: string): Promise<ScrapedUnit[]> {
+    const html = await this.fetchPage(url);
+    const units = this.parseUnitsTable(html);
+    
+    // Write all units to database
+    console.log(`📦 Writing ${units.length} units to database...`);
+    for (const unit of units) {
+      await this.db.createOrUpdateUnit(unit);
+    }
+    
+    console.log(`✅ All ${units.length} units saved to database!`);
+    return units;
   }
 
   async scrapeSongs(url: string): Promise<ScrapedSong[]> {
