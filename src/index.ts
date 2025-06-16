@@ -36,19 +36,19 @@ async function main() {
     const wikiUrl = 'https://project-imas.wiki/THE_iDOLM@STER_CINDERELLA_GIRLS_STARLIGHT_STAGE';
     console.log(`🌐 Scraping CGSS wiki: ${wikiUrl}`);
 
-    const scrapedSongs = await scraper.scrapeSongs(wikiUrl);
-    console.log(`📋 Found ${scrapedSongs.length} songs on the wiki page`);
+    const scrapedSongs = await scraper.scrapeSongsWithDetails(wikiUrl, true);
+    console.log(`📋 Found ${scrapedSongs.length} songs on the wiki page (with detailed info)`);
     const scrapedUnits = await scraper.scrapeUnits(wikiUrl);
     console.log(`📋 Found ${scrapedUnits.length} units on the wiki page`);
 
     // Process scraped songs with unit handling
     if (scrapedSongs.length > 0) {
       for (const songData of scrapedSongs) {
-        // Process unit first if present
+        // Process unit first if present (only for units that need external scraping)
         await processUnitIfNeeded(scraper, dbService, songData);
         
-        // Then process the song
-        await dbService.createOrUpdateSong(songData);
+        // Songs are already saved to database by scrapeSongsWithDetails
+        // No need to call createOrUpdateSong again
       }
     } else {
       console.log('⚠️  No songs found, using fallback test data...');

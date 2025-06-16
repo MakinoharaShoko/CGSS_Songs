@@ -21,6 +21,18 @@ export class DatabaseService {
           originalIdols: songData.originalIdols,
           howToObtain: songData.howToObtain,
           unitId: unitId,
+          
+          // Extended fields from song detail pages
+          songUrl: songData.songUrl,
+          originalTitle: songData.originalTitle,
+          romanizedTitle: songData.romanizedTitle,
+          translatedTitle: songData.translatedTitle,
+          composer: songData.composer,
+          lyricist: songData.lyricist,
+          arranger: songData.arranger,
+          remix: songData.remix,
+          bpm: songData.bpm,
+          starlightStageType: songData.starlightStageType,
         },
         create: {
           name: songData.name,
@@ -28,6 +40,18 @@ export class DatabaseService {
           originalIdols: songData.originalIdols,
           howToObtain: songData.howToObtain,
           unitId: unitId,
+          
+          // Extended fields from song detail pages
+          songUrl: songData.songUrl,
+          originalTitle: songData.originalTitle,
+          romanizedTitle: songData.romanizedTitle,
+          translatedTitle: songData.translatedTitle,
+          composer: songData.composer,
+          lyricist: songData.lyricist,
+          arranger: songData.arranger,
+          remix: songData.remix,
+          bpm: songData.bpm,
+          starlightStageType: songData.starlightStageType,
         },
       });
 
@@ -38,7 +62,26 @@ export class DatabaseService {
         }
       }
 
-      console.log(`✅ Processed song: ${song.name} (${songData.unitName ? `Unit: ${songData.unitName}` : `${songData.idols.length} idols`})`);
+      // Log detailed information about what was saved
+      const detailsLogged = [];
+      if (songData.originalTitle) detailsLogged.push(`Original: "${songData.originalTitle}"`);
+      if (songData.romanizedTitle) detailsLogged.push(`Romanized: "${songData.romanizedTitle}"`);
+      if (songData.translatedTitle) detailsLogged.push(`Translated: "${songData.translatedTitle}"`);
+      if (songData.composer) detailsLogged.push(`Composer: "${songData.composer}"`);
+      if (songData.lyricist) detailsLogged.push(`Lyricist: "${songData.lyricist}"`);
+      if (songData.arranger) detailsLogged.push(`Arranger: "${songData.arranger}"`);
+      if (songData.bpm) detailsLogged.push(`BPM: ${songData.bpm}`);
+      if (songData.starlightStageType) detailsLogged.push(`Type: "${songData.starlightStageType}"`);
+      if (songData.remix) detailsLogged.push(`Remix: "${songData.remix}"`);
+
+      const baseInfo = `${song.name} (${songData.attributeType}) - ${songData.unitName ? `Unit: ${songData.unitName}` : `${songData.idols.length} idols`}`;
+      
+      if (detailsLogged.length > 0) {
+        console.log(`✅ Saved with details: ${baseInfo}`);
+        console.log(`   📝 Details: ${detailsLogged.join(', ')}`);
+      } else {
+        console.log(`✅ Saved basic info: ${baseInfo}`);
+      }
     } catch (error) {
       console.error(`❌ Failed to process song ${songData.name}:`, error);
       throw error;

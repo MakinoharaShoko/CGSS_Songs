@@ -10,6 +10,18 @@ export interface ScrapedSong {
   idols: string[];        // Array of idol names (comma and "and" separated in original)
   unitName?: string;      // Unit name if this is a unit song
   unitUrl?: string;       // Unit page URL for scraping
+  
+  // Extended fields from song detail pages
+  songUrl?: string;       // URL to the song detail page
+  originalTitle?: string; // Original Title (Japanese)
+  romanizedTitle?: string; // Romanized Title
+  translatedTitle?: string; // Translated Title
+  composer?: string;      // Composer
+  lyricist?: string;      // Lyricist
+  arranger?: string;      // Arranger
+  remix?: string;         // Remix information
+  bpm?: number;          // BPM (beats per minute)
+  starlightStageType?: string; // STARLIGHT STAGE Song Type
 }
 
 export interface ScrapedIdol {
@@ -386,7 +398,24 @@ export class CGSSScraper {
       const cells = $row.find('td');
       if (cells.length < 3) return; // Need at least 3 columns
       
-      const name = songNameIndex < cells.length ? $(cells[songNameIndex]).text().trim() : '';
+      // Extract song name and URL from the first cell
+      const songCell = songNameIndex < cells.length ? $(cells[songNameIndex]) : null;
+      let name = '';
+      let songUrl: string | undefined;
+      
+      if (songCell) {
+        const songLink = songCell.find('a').first();
+        if (songLink.length) {
+          name = songLink.text().trim();
+          const href = songLink.attr('href');
+          if (href) {
+            songUrl = href.startsWith('http') ? href : this.baseUrl + href;
+          }
+        } else {
+          name = songCell.text().trim();
+        }
+      }
+      
       const attributeType = attributeIndex < cells.length ? $(cells[attributeIndex]).text().trim() : '';
       const idolsCell = idolsIndex < cells.length ? $(cells[idolsIndex]) : null;
       const howToObtain = obtainIndex < cells.length ? $(cells[obtainIndex]).text().trim() : '';
@@ -470,6 +499,7 @@ export class CGSSScraper {
           idols: unitName ? (foundUnit?.members || []) : idols, // Use cached unit members if available
           unitName,
           unitUrl,
+          songUrl, // Add the song detail page URL
         };
         
         songs.push(song);
@@ -511,5 +541,178 @@ export class CGSSScraper {
   async scrapeIdols(url: string): Promise<ScrapedIdol[]> {
     // Simple implementation - in reality this would parse idol pages
     return [];
+  }
+
+  // Scrape individual song detail page for extended information
+  async scrapeSongDetails(url: string): Promise<Partial<ScrapedSong>> {
+    try {
+      console.log(`🎵 Scraping song details from: ${url}`);
+      const html = await this.fetchPage(url);
+      const $ = cheerio.load(html);
+      
+      const songDetails: Partial<ScrapedSong> = {};
+      
+      // Find the song details table with width="100%" border="0" style="text-align:left;"
+      // or any table that contains song information
+      let detailsFound = false;
+      
+      $('table').each((tableIndex, table) => {
+        const $table = $(table);
+        
+        // Check if this is a details table by looking for typical song detail fields
+        const tableText = $table.text().toLowerCase();
+        if (tableText.includes('original title') || 
+            tableText.includes('composer') || 
+            tableText.includes('lyricist') ||
+            tableText.includes('bpm')) {
+          
+          console.log(`🔍 Found song details table ${tableIndex}`);
+          detailsFound = true;
+          
+          // Parse each row in the table
+          $table.find('tr').each((rowIndex, row) => {
+            const $row = $(row);
+            const cells = $row.find('td');
+            
+            if (cells.length >= 2) {
+              const labelCell = $(cells[0]);
+              const valueCell = $(cells[1]);
+              
+              const label = labelCell.text().trim().toLowerCase();
+              const value = valueCell.text().trim();
+              
+              // Extract information based on labels
+              if (label.includes('original title')) {
+                songDetails.originalTitle = value;
+              } else if (label.includes('romanized title')) {
+                songDetails.romanizedTitle = value;
+              } else if (label.includes('translated title')) {
+                songDetails.translatedTitle = value;
+              } else if (label.includes('composer')) {
+                // Extract composer name from link or text
+                const composerLink = valueCell.find('a').first();
+                songDetails.composer = composerLink.length ? composerLink.text().trim() : value;
+              } else if (label.includes('lyricist')) {
+                // Extract lyricist name from link or text
+                const lyricistLink = valueCell.find('a').first();
+                songDetails.lyricist = lyricistLink.length ? lyricistLink.text().trim() : value;
+              } else if (label.includes('arranger')) {
+                // Extract arranger name from link or text
+                const arrangerLink = valueCell.find('a').first();
+                songDetails.arranger = arrangerLink.length ? arrangerLink.text().trim() : value;
+              } else if (label.includes('remix')) {
+                songDetails.remix = value;
+              } else if (label.includes('bpm')) {
+                const bpmValue = parseInt(value, 10);
+                if (!isNaN(bpmValue)) {
+                  songDetails.bpm = bpmValue;
+                }
+              } else if (label.includes('starlight stage') && label.includes('song type')) {
+                songDetails.starlightStageType = value;
+              }
+            }
+          });
+          
+          return false; // Break out of table loop once we found the details table
+        }
+      });
+      
+      if (detailsFound) {
+        console.log(`✅ Extracted song details: ${Object.keys(songDetails).length} fields`);
+        return songDetails;
+      } else {
+        console.log(`⚠️ No song details table found in: ${url}`);
+        return {};
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to scrape song details from ${url}:`, error);
+      return {};
+    }
+  }
+
+  // Process songs and optionally scrape their detail pages for extended information
+  async scrapeSongsWithDetails(url: string, scrapeDetails: boolean = true): Promise<ScrapedSong[]> {
+    console.log(`🎵 Starting songs scraping from: ${url}`);
+    console.log(`📄 Detailed scraping: ${scrapeDetails ? 'ENABLED' : 'DISABLED'}`);
+    
+    const songs = await this.scrapeSongs(url);
+    
+    if (!scrapeDetails) {
+      // Even if not scraping details, we should still save basic song info to database
+      console.log(`💾 Saving ${songs.length} basic songs to database...`);
+      for (const song of songs) {
+        await this.db.createOrUpdateSong(song);
+      }
+      return songs;
+    }
+    
+    // Filter songs that have URLs and scrape their details
+    const songsWithUrls = songs.filter(song => song.songUrl);
+    console.log(`🔗 Found ${songsWithUrls.length} songs with detail page URLs out of ${songs.length} total songs`);
+    
+    const detailedSongs: ScrapedSong[] = [];
+    let processedCount = 0;
+    
+    for (const song of songs) {
+      if (song.songUrl) {
+        try {
+          console.log(`\n🎵 [${++processedCount}/${songsWithUrls.length}] Processing: ${song.name}`);
+          const details = await this.scrapeSongDetails(song.songUrl);
+          
+          // Merge the details into the song object
+          const detailedSong: ScrapedSong = {
+            ...song,
+            ...details
+          };
+          
+          // Save to database immediately
+          await this.db.createOrUpdateSong(detailedSong);
+          
+          detailedSongs.push(detailedSong);
+          
+          // Show what details were found
+          const foundDetails = Object.keys(details).filter(key => details[key as keyof typeof details] !== undefined);
+          if (foundDetails.length > 0) {
+            console.log(`  ✅ Found details: ${foundDetails.join(', ')}`);
+            
+            // Log the actual values for verification
+            const detailValues = [];
+            if (details.originalTitle) detailValues.push(`Original: "${details.originalTitle}"`);
+            if (details.romanizedTitle) detailValues.push(`Romanized: "${details.romanizedTitle}"`);
+            if (details.composer) detailValues.push(`Composer: "${details.composer}"`);
+            if (details.bpm) detailValues.push(`BPM: ${details.bpm}`);
+            if (detailValues.length > 0) {
+              console.log(`  📝 Values: ${detailValues.join(', ')}`);
+            }
+          } else {
+            console.log(`  ⚠️ No additional details found`);
+          }
+          
+          // Add a small delay to be respectful to the server
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          console.error(`❌ Failed to scrape details for ${song.name}: ${error}`);
+          // Still save the basic song info to database
+          await this.db.createOrUpdateSong(song);
+          detailedSongs.push(song);
+        }
+      } else {
+        // Save song without attempting to scrape details
+        await this.db.createOrUpdateSong(song);
+        detailedSongs.push(song);
+        console.log(`🎵 No URL found for: ${song.name}`);
+      }
+    }
+    
+    const totalWithDetails = detailedSongs.filter(s => s.originalTitle || s.composer || s.bpm).length;
+    console.log(`\n📊 Detail scraping complete:`);
+    console.log(`  Total songs processed: ${detailedSongs.length}`);
+    console.log(`  Songs with extended details: ${totalWithDetails}`);
+    console.log(`  Songs with URLs but no details: ${songsWithUrls.length - totalWithDetails}`);
+    console.log(`  All songs saved to database: ✅`);
+    
+    return detailedSongs;
   }
 }
