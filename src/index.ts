@@ -40,6 +40,11 @@ async function main() {
     console.log(`📋 Found ${scrapedSongs.length} songs on the wiki page (with detailed info)`);
     const scrapedUnits = await scraper.scrapeUnits(wikiUrl);
     console.log(`📋 Found ${scrapedUnits.length} units on the wiki page`);
+    
+    // 🆕 Extract and scrape idol details from the songs
+    console.log('\n👥 Starting idol extraction and detailed scraping...');
+    const scrapedIdols = await scraper.scrapeIdolsFromSongs(scrapedSongs, true); // Enable detailed scraping
+    console.log(`📋 Found ${scrapedIdols.length} idols, processed with detailed info`);
 
     // Process scraped songs with unit handling
     if (scrapedSongs.length > 0) {

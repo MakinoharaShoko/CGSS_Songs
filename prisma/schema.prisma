@@ -41,11 +41,12 @@ model Song {
 
 model Idol {
   id        Int      @id @default(autoincrement())
-  name      String   @unique
+  name      String   @unique  // English name from songs (e.g., "Riina Tada")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
   // Extended fields from idol detail pages
+  originalName  String? // Japanese original name (e.g., "多田李衣菜")
   voiceActor    String? // Voice Actor
   age           Int?    // Age
   height        String? // Height (e.g., "152 cm")

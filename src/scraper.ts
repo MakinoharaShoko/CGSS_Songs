@@ -25,7 +25,8 @@ export interface ScrapedSong {
 }
 
 export interface ScrapedIdol {
-  name: string;
+  name: string;           // English name from songs (e.g., "Riina Tada")
+  originalName?: string;  // Japanese original name (e.g., "多田李衣菜")
   voiceActor?: string;
   age?: number;
   height?: string;
@@ -458,7 +459,8 @@ export class CGSSScraper {
             
             // If exact match fails, try fuzzy matching
             if (!foundUnit) {
-              for (const [key, unit] of this.unitsMap.entries()) {
+              const entries = Array.from(this.unitsMap.entries());
+              for (const [key, unit] of entries) {
                 // Try case-insensitive match
                 if (key.toLowerCase() === unitName.toLowerCase()) {
                   foundUnit = unit;
@@ -597,10 +599,10 @@ export class CGSSScraper {
               
               // Extract information based on labels
               if (label.includes('name')) {
-                // Extract name from parentheses if present
-                const nameMatch = value.match(/^([^(]+)/);
-                if (nameMatch) {
-                  idolDetails.name = nameMatch[1].trim();
+                // Extract original Japanese name (before parentheses)
+                const originalNameMatch = value.match(/^([^(]+)/);
+                if (originalNameMatch) {
+                  idolDetails.originalName = originalNameMatch[1].trim();
                 }
               } else if (label.includes('voiceactor')) {
                 // Extract voice actor name from link or text

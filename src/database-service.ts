@@ -204,6 +204,7 @@ export class DatabaseService {
       const idol = await prisma.idol.upsert({
         where: { name: idolData.name },
         update: {
+          originalName: idolData.originalName,
           voiceActor: idolData.voiceActor,
           age: idolData.age,
           height: idolData.height,
@@ -221,6 +222,7 @@ export class DatabaseService {
         },
         create: {
           name: idolData.name,
+          originalName: idolData.originalName,
           voiceActor: idolData.voiceActor,
           age: idolData.age,
           height: idolData.height,
@@ -240,6 +242,7 @@ export class DatabaseService {
 
       // Log detailed information about what was saved
       const detailsLogged = [];
+      if (idolData.originalName) detailsLogged.push(`Original: ${idolData.originalName}`);
       if (idolData.voiceActor) detailsLogged.push(`VA: ${idolData.voiceActor}`);
       if (idolData.age) detailsLogged.push(`Age: ${idolData.age}`);
       if (idolData.cardType) detailsLogged.push(`Type: ${idolData.cardType}`);
