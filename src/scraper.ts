@@ -59,7 +59,7 @@ export class CGSSScraper {
   private db: DatabaseService = new DatabaseService();
   
   // Concurrent processing control
-  private defaultConcurrency = 5; // Default concurrent requests
+  private defaultConcurrency = 100; // Default concurrent requests
   
   // Generic concurrent processing function
   async processConcurrently<T, R>(
@@ -282,6 +282,20 @@ export class CGSSScraper {
       
       // Skip the Units table - we already processed it
       if (headerText.includes('cinderella girls starlight stage units')) {
+        return;
+      }
+      
+      // Skip Remix tables
+      const isRemixTable = 
+        headerText.includes('rearrange and remix songs') ||
+        headerText.includes('remix') ||
+        headerText.includes('medley') ||
+        $table.find('th').text().toLowerCase().includes('remix') ||
+        $table.find('th').text().toLowerCase().includes('rearrange mix') ||
+        $table.find('caption').text().toLowerCase().includes('remix');
+      
+      if (isRemixTable) {
+        console.log(`⏭️ Skipping remix/rearrange table: "${headerText.substring(0, 50)}..."`);
         return;
       }
       
@@ -749,6 +763,7 @@ export class CGSSScraper {
   }
 
   // Scrape idol from URL - handles both name formats and redirects
+  // Note: name parameter is the original English name from main page table and will be preserved
   async scrapeIdolFromUrl(idolName: string): Promise<ScrapedIdol | null> {
     try {
       // Try different URL formats - spaces and underscores
@@ -764,13 +779,17 @@ export class CGSSScraper {
           const details = await this.scrapeIdolDetails(url);
           
           if (Object.keys(details).length > 0) {
+            // First get all details except the name
+            const { name: _, ...otherDetails } = details;
+            
+            // Create idol object with original name and other details
             const idol: ScrapedIdol = {
-              name: idolName,
-              ...details,
-              idolUrl: url
+              name: idolName, // Original English name from main page is preserved
+              idolUrl: url,
+              ...otherDetails // Add all other details except name
             };
             
-            console.log(`✅ Successfully scraped idol: ${idolName}`);
+            console.log(`✅ Successfully scraped idol: ${idolName} (preserving original name)`);
             return idol;
           }
         } catch (error) {
@@ -935,10 +954,11 @@ export class CGSSScraper {
         try {
           const details = await this.scrapeSongDetails(song.songUrl!);
           
-          // Merge the details into the song object
+          // Merge the details into the song object, but preserve originalIdols
+          const { originalIdols: _, ...otherDetails } = details;
           const detailedSong: ScrapedSong = {
-            ...song,
-            ...details
+            ...song, // Keep original song data including originalIdols
+            ...otherDetails // Add other details except originalIdols
           };
           
           // Save to database immediately
