@@ -58,6 +58,70 @@ export class CGSSScraper {
   private unitsMap: Map<string, ScrapedUnit> = new Map(); // All units from the page
   private db: DatabaseService = new DatabaseService();
   
+  // Concurrent processing control
+  private defaultConcurrency = 5; // Default concurrent requests
+  
+  // Generic concurrent processing function
+  async processConcurrently<T, R>(
+    items: T[],
+    processor: (item: T, index: number) => Promise<R>,
+    concurrency: number = this.defaultConcurrency,
+    delayMs: number = 500
+  ): Promise<R[]> {
+    const results: R[] = [];
+    const chunks = [];
+    
+    // Split items into chunks for concurrent processing
+    for (let i = 0; i < items.length; i += concurrency) {
+      chunks.push(items.slice(i, i + concurrency));
+    }
+    
+    console.log(`🚀 Processing ${items.length} items in ${chunks.length} batches of ${concurrency}`);
+    
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      const chunk = chunks[chunkIndex];
+      console.log(`📦 Batch ${chunkIndex + 1}/${chunks.length}: Processing ${chunk.length} items...`);
+      
+      try {
+        // Process chunk concurrently using Promise.allSettled to handle individual failures
+        const chunkPromises = chunk.map((item, localIndex) => {
+          const globalIndex = chunkIndex * concurrency + localIndex;
+          return processor(item, globalIndex);
+        });
+        
+        const chunkResults = await Promise.allSettled(chunkPromises);
+        
+        // Process results and count successes/failures
+        let successes = 0;
+        let failures = 0;
+        
+        chunkResults.forEach((result, localIndex) => {
+          const globalIndex = chunkIndex * concurrency + localIndex;
+          if (result.status === 'fulfilled') {
+            results[globalIndex] = result.value;
+            successes++;
+          } else {
+            console.error(`❌ Item ${globalIndex + 1} failed: ${result.reason}`);
+            failures++;
+          }
+        });
+        
+        console.log(`✅ Batch ${chunkIndex + 1} complete: ${successes} success, ${failures} failed`);
+        
+        // Add delay between batches (except for the last one)
+        if (chunkIndex < chunks.length - 1 && delayMs > 0) {
+          console.log(`⏳ Waiting ${delayMs}ms before next batch...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+        
+      } catch (error) {
+        console.error(`❌ Batch ${chunkIndex + 1} failed:`, error);
+      }
+    }
+    
+    return results.filter(result => result !== undefined);
+  }
+  
   async fetchPage(url: string): Promise<string> {
     try {
       const response = await fetch(url, {
@@ -813,33 +877,63 @@ export class CGSSScraper {
   }
 
   // Process songs and optionally scrape their detail pages for extended information
-  async scrapeSongsWithDetails(url: string, scrapeDetails: boolean = true): Promise<ScrapedSong[]> {
+  async scrapeSongsWithDetails(
+    url: string, 
+    scrapeDetails: boolean = true,
+    concurrency: number = this.defaultConcurrency
+  ): Promise<ScrapedSong[]> {
     console.log(`🎵 Starting songs scraping from: ${url}`);
     console.log(`📄 Detailed scraping: ${scrapeDetails ? 'ENABLED' : 'DISABLED'}`);
     
     const songs = await this.scrapeSongs(url);
     
     if (!scrapeDetails) {
-      // Even if not scraping details, we should still save basic song info to database
-      console.log(`💾 Saving ${songs.length} basic songs to database...`);
-      for (const song of songs) {
-        await this.db.createOrUpdateSong(song);
-      }
+      // Save basic song info to database concurrently
+      console.log(`💾 Saving ${songs.length} basic songs to database (concurrent)...`);
+      
+      await this.processConcurrently(
+        songs,
+        async (song: ScrapedSong, index: number) => {
+          await this.db.createOrUpdateSong(song);
+          return song;
+        },
+        concurrency * 2, // Database operations can be faster
+        200
+      );
+      
       return songs;
     }
     
     // Filter songs that have URLs and scrape their details
     const songsWithUrls = songs.filter(song => song.songUrl);
+    const songsWithoutUrls = songs.filter(song => !song.songUrl);
+    
     console.log(`🔗 Found ${songsWithUrls.length} songs with detail page URLs out of ${songs.length} total songs`);
     
-    const detailedSongs: ScrapedSong[] = [];
-    let processedCount = 0;
+    // First, save songs without URLs
+    if (songsWithoutUrls.length > 0) {
+      console.log(`💾 Saving ${songsWithoutUrls.length} songs without URLs...`);
+      await this.processConcurrently(
+        songsWithoutUrls,
+        async (song: ScrapedSong, index: number) => {
+          await this.db.createOrUpdateSong(song);
+          return song;
+        },
+        concurrency * 2,
+        200
+      );
+    }
     
-    for (const song of songs) {
-      if (song.songUrl) {
+    // Process songs with URLs concurrently
+    console.log(`🔍 Starting concurrent detail scraping for ${songsWithUrls.length} songs (${concurrency} concurrent)...`);
+    
+    const detailedSongs = await this.processConcurrently(
+      songsWithUrls,
+      async (song: ScrapedSong, index: number) => {
+        console.log(`🎵 [${index + 1}/${songsWithUrls.length}] Processing: ${song.name}`);
+        
         try {
-          console.log(`\n🎵 [${++processedCount}/${songsWithUrls.length}] Processing: ${song.name}`);
-          const details = await this.scrapeSongDetails(song.songUrl);
+          const details = await this.scrapeSongDetails(song.songUrl!);
           
           // Merge the details into the song object
           const detailedSong: ScrapedSong = {
@@ -850,55 +944,55 @@ export class CGSSScraper {
           // Save to database immediately
           await this.db.createOrUpdateSong(detailedSong);
           
-          detailedSongs.push(detailedSong);
-          
           // Show what details were found
           const foundDetails = Object.keys(details).filter(key => details[key as keyof typeof details] !== undefined);
           if (foundDetails.length > 0) {
-            console.log(`  ✅ Found details: ${foundDetails.join(', ')}`);
-            
-            // Log the actual values for verification
             const detailValues = [];
             if (details.originalTitle) detailValues.push(`Original: "${details.originalTitle}"`);
-            if (details.romanizedTitle) detailValues.push(`Romanized: "${details.romanizedTitle}"`);
             if (details.composer) detailValues.push(`Composer: "${details.composer}"`);
             if (details.bpm) detailValues.push(`BPM: ${details.bpm}`);
+            
+            console.log(`  ✅ ${song.name}: ${foundDetails.length} details found`);
             if (detailValues.length > 0) {
-              console.log(`  📝 Values: ${detailValues.join(', ')}`);
+              console.log(`     ${detailValues.join(', ')}`);
             }
           } else {
-            console.log(`  ⚠️ No additional details found`);
+            console.log(`  ⚠️ ${song.name}: No additional details found`);
           }
           
-          // Add a small delay to be respectful to the server
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          return detailedSong;
           
         } catch (error) {
           console.error(`❌ Failed to scrape details for ${song.name}: ${error}`);
           // Still save the basic song info to database
           await this.db.createOrUpdateSong(song);
-          detailedSongs.push(song);
+          return song;
         }
-      } else {
-        // Save song without attempting to scrape details
-        await this.db.createOrUpdateSong(song);
-        detailedSongs.push(song);
-        console.log(`🎵 No URL found for: ${song.name}`);
-      }
-    }
+      },
+      concurrency,
+      800 // Slightly shorter delay for song scraping
+    );
     
+    // Combine all results
+    const allSongs = [...songsWithoutUrls, ...detailedSongs];
     const totalWithDetails = detailedSongs.filter(s => s.originalTitle || s.composer || s.bpm).length;
-    console.log(`\n📊 Detail scraping complete:`);
-    console.log(`  Total songs processed: ${detailedSongs.length}`);
+    
+    console.log(`\n📊 Concurrent detail scraping complete:`);
+    console.log(`  Total songs processed: ${allSongs.length}`);
     console.log(`  Songs with extended details: ${totalWithDetails}`);
     console.log(`  Songs with URLs but no details: ${songsWithUrls.length - totalWithDetails}`);
+    console.log(`  🚀 Speed improvement: ~${concurrency}x faster!`);
     console.log(`  All songs saved to database: ✅`);
     
-    return detailedSongs;
+    return allSongs;
   }
 
   // Extract unique idol names from songs and optionally scrape their details
-  async scrapeIdolsFromSongs(songs: ScrapedSong[], scrapeDetails: boolean = false): Promise<ScrapedIdol[]> {
+  async scrapeIdolsFromSongs(
+    songs: ScrapedSong[], 
+    scrapeDetails: boolean = false, 
+    concurrency: number = this.defaultConcurrency
+  ): Promise<ScrapedIdol[]> {
     console.log(`👥 Extracting idols from ${songs.length} songs...`);
     
     // Collect all unique idol names
@@ -916,69 +1010,81 @@ export class CGSSScraper {
     console.log(`👥 Found ${idolNames.length} unique idols`);
     
     if (!scrapeDetails) {
-      // Save basic idol objects to database without detailed scraping
-      const basicIdols: ScrapedIdol[] = [];
-      for (const name of idolNames) {
-        const basicIdol = { name };
-        await this.db.createOrUpdateIdol(basicIdol);
-        basicIdols.push(basicIdol);
-      }
+      // Save basic idol objects to database without detailed scraping (concurrent)
+      console.log(`📝 Saving ${idolNames.length} basic idol records to database (concurrent)...`);
+      
+      const basicIdols = await this.processConcurrently(
+        idolNames,
+        async (name: string, index: number) => {
+          const basicIdol = { name };
+          await this.db.createOrUpdateIdol(basicIdol);
+          return basicIdol;
+        },
+        concurrency * 2, // Basic saves can be faster
+        200 // Shorter delay for database operations
+      );
+      
       console.log(`📝 Saved ${basicIdols.length} basic idol records to database`);
       return basicIdols;
     }
     
-    // Scrape detailed information for each idol
-    console.log(`🔍 Starting detailed scraping for ${idolNames.length} idols...`);
+    // Scrape detailed information for each idol (concurrent)
+    console.log(`🔍 Starting concurrent detailed scraping for ${idolNames.length} idols (${concurrency} concurrent)...`);
     
-    const detailedIdols: ScrapedIdol[] = [];
-    let processedCount = 0;
-    
-    for (const idolName of idolNames) {
-      console.log(`\n👤 [${++processedCount}/${idolNames.length}] Processing: ${idolName}`);
-      
-      try {
-        const idol = await this.scrapeIdolFromUrl(idolName);
+    const detailedIdols = await this.processConcurrently(
+      idolNames,
+      async (idolName: string, index: number) => {
+        console.log(`👤 [${index + 1}/${idolNames.length}] Processing: ${idolName}`);
         
-        if (idol) {
-          // Save to database immediately
-          await this.db.createOrUpdateIdol(idol);
-          detailedIdols.push(idol);
+        try {
+          const idol = await this.scrapeIdolFromUrl(idolName);
           
-          // Log what details were found
-          const foundDetails = [];
-          if (idol.voiceActor) foundDetails.push(`VA: ${idol.voiceActor}`);
-          if (idol.age) foundDetails.push(`Age: ${idol.age}`);
-          if (idol.cardType) foundDetails.push(`Type: ${idol.cardType}`);
-          if (idol.hometown) foundDetails.push(`From: ${idol.hometown}`);
-          
-          if (foundDetails.length > 0) {
-            console.log(`  ✅ Details: ${foundDetails.join(', ')}`);
+          if (idol) {
+            // Save to database immediately
+            await this.db.createOrUpdateIdol(idol);
+            
+            // Log what details were found
+            const foundDetails = [];
+            if (idol.originalName) foundDetails.push(`Original: ${idol.originalName}`);
+            if (idol.voiceActor) foundDetails.push(`VA: ${idol.voiceActor}`);
+            if (idol.age) foundDetails.push(`Age: ${idol.age}`);
+            if (idol.cardType) foundDetails.push(`Type: ${idol.cardType}`);
+            
+            if (foundDetails.length > 0) {
+              console.log(`  ✅ ${idolName}: ${foundDetails.join(', ')}`);
+            } else {
+              console.log(`  ⚠️ ${idolName}: No additional details found`);
+            }
+            
+            return idol;
           } else {
-            console.log(`  ⚠️ No additional details found`);
+            // Still add basic idol info even if detailed scraping failed
+            const basicIdol = { name: idolName };
+            await this.db.createOrUpdateIdol(basicIdol);
+            console.log(`  ❌ ${idolName}: Detailed scraping failed, added basic info only`);
+            return basicIdol;
           }
-        } else {
-          // Still add basic idol info even if detailed scraping failed
+          
+        } catch (error) {
+          console.error(`❌ Failed to process idol ${idolName}: ${error}`);
+          // Add basic idol info as fallback
           const basicIdol = { name: idolName };
           await this.db.createOrUpdateIdol(basicIdol);
-          detailedIdols.push(basicIdol);
-          console.log(`  ❌ Detailed scraping failed, added basic info only`);
+          return basicIdol;
         }
-        
-        // Add delay to be respectful to the server
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-      } catch (error) {
-        console.error(`❌ Failed to process idol ${idolName}: ${error}`);
-        // Add basic idol info as fallback
-        detailedIdols.push({ name: idolName });
-      }
-    }
+      },
+      concurrency,
+      1000 // 1 second delay between batches for detailed scraping
+    );
     
-    const totalWithDetails = detailedIdols.filter(i => i.voiceActor || i.age || i.cardType).length;
-    console.log(`\n📊 Idol processing complete:`);
+    const totalWithDetails = detailedIdols.filter(i => 
+      (i as any).voiceActor || (i as any).age || (i as any).cardType
+    ).length;
+    console.log(`\n📊 Concurrent idol processing complete:`);
     console.log(`  Total idols processed: ${detailedIdols.length}`);
     console.log(`  Idols with detailed info: ${totalWithDetails}`);
     console.log(`  Basic info only: ${detailedIdols.length - totalWithDetails}`);
+    console.log(`  🚀 Speed improvement: ~${concurrency}x faster!`);
     
     return detailedIdols;
   }

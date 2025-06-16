@@ -13,7 +13,7 @@ interface IdolUpdateStats {
   skipped: number;
 }
 
-async function updateIdolDetails() {
+async function updateIdolDetails(concurrency: number = 5) {
   const scraper = new CGSSScraper();
   const dbService = new DatabaseService();
   
@@ -59,63 +59,72 @@ async function updateIdolDetails() {
       return;
     }
     
-    console.log(`\n🚀 Starting detail updates for ${stats.needsUpdate} idols...`);
-    console.log('⏱️  This will take approximately ' + 
-                Math.ceil(stats.needsUpdate * 2.5 / 60) + ' minutes\n');
+    console.log(`\n🚀 Starting concurrent detail updates for ${stats.needsUpdate} idols (${concurrency} concurrent)...`);
+    const estimatedTime = Math.ceil(stats.needsUpdate / concurrency * 1.5 / 60);
+    console.log(`⏱️  This will take approximately ${estimatedTime} minutes (vs ${Math.ceil(stats.needsUpdate * 2.5 / 60)} minutes sequential)\n`);
     
-    let processedCount = 0;
-    
-    for (const idol of idolsNeedingUpdate) {
-      processedCount++;
-      
-      console.log(`\n👤 [${processedCount}/${stats.needsUpdate}] Processing: ${idol.name}`);
-      console.log(`   Current status: VA=${idol.voiceActor ? '✓' : '✗'}, Age=${idol.age ? '✓' : '✗'}, Type=${idol.cardType ? '✓' : '✗'}`);
-      
-      try {
-        // Scrape detailed information
-        const detailedInfo = await scraper.scrapeIdolFromUrl(idol.name);
+    // Use the scraper's concurrent processing function
+    const results = await scraper.processConcurrently(
+      idolsNeedingUpdate,
+      async (idol: any, index: number) => {
+        console.log(`👤 [${index + 1}/${stats.needsUpdate}] Processing: ${idol.name}`);
+        console.log(`   Current status: VA=${idol.voiceActor ? '✓' : '✗'}, Age=${idol.age ? '✓' : '✗'}, Type=${idol.cardType ? '✓' : '✗'}`);
         
-        if (detailedInfo && hasNewInformation(idol, detailedInfo)) {
-          // Update database with new information
-          await dbService.createOrUpdateIdol(detailedInfo);
+        try {
+          // Scrape detailed information
+          const detailedInfo = await scraper.scrapeIdolFromUrl(idol.name);
           
-          stats.successful++;
-          
-          // Show what was updated
-          const updates = [];
-          if (!idol.originalName && detailedInfo.originalName) updates.push(`Original: ${detailedInfo.originalName}`);
-          if (!idol.voiceActor && detailedInfo.voiceActor) updates.push(`VA: ${detailedInfo.voiceActor}`);
-          if (!idol.age && detailedInfo.age) updates.push(`Age: ${detailedInfo.age}`);
-          if (!idol.cardType && detailedInfo.cardType) updates.push(`Type: ${detailedInfo.cardType}`);
-          if (!idol.hometown && detailedInfo.hometown) updates.push(`From: ${detailedInfo.hometown}`);
-          if (!idol.hobbies && detailedInfo.hobbies) updates.push(`Hobbies: ${detailedInfo.hobbies}`);
-          
-          if (updates.length > 0) {
-            console.log(`   ✅ Updated: ${updates.join(', ')}`);
+          if (detailedInfo && hasNewInformation(idol, detailedInfo)) {
+            // Update database with new information
+            await dbService.createOrUpdateIdol(detailedInfo);
+            
+            // Show what was updated
+            const updates = [];
+            if (!idol.originalName && detailedInfo.originalName) updates.push(`Original: ${detailedInfo.originalName}`);
+            if (!idol.voiceActor && detailedInfo.voiceActor) updates.push(`VA: ${detailedInfo.voiceActor}`);
+            if (!idol.age && detailedInfo.age) updates.push(`Age: ${detailedInfo.age}`);
+            if (!idol.cardType && detailedInfo.cardType) updates.push(`Type: ${detailedInfo.cardType}`);
+            if (!idol.hometown && detailedInfo.hometown) updates.push(`From: ${detailedInfo.hometown}`);
+            if (!idol.hobbies && detailedInfo.hobbies) updates.push(`Hobbies: ${detailedInfo.hobbies}`);
+            
+            if (updates.length > 0) {
+              console.log(`   ✅ ${idol.name}: ${updates.join(', ')}`);
+            } else {
+              console.log(`   ℹ️  ${idol.name}: No new information found, but record refreshed`);
+            }
+            
+            return { status: 'success', idol, updates };
+            
           } else {
-            console.log(`   ℹ️  No new information found, but record refreshed`);
+            console.log(`   ⚠️  ${idol.name}: No new information available`);
+            return { status: 'skipped', idol };
           }
           
-        } else {
-          stats.skipped++;
-          console.log(`   ⚠️  No new information available`);
+        } catch (error) {
+          console.error(`   ❌ ${idol.name}: Failed to update - ${error}`);
+          return { status: 'failed', idol, error };
         }
-        
-      } catch (error) {
-        stats.failed++;
-        console.error(`   ❌ Failed to update ${idol.name}: ${error}`);
+      },
+      concurrency,
+      1000 // 1 second delay between batches
+    );
+    
+    // Process results and update stats
+    results.forEach(result => {
+      if (result) {
+        switch (result.status) {
+          case 'success':
+            stats.successful++;
+            break;
+          case 'skipped':
+            stats.skipped++;
+            break;
+          case 'failed':
+            stats.failed++;
+            break;
+        }
       }
-      
-      // Progress indicator
-      const progress = Math.round((processedCount / stats.needsUpdate) * 100);
-      console.log(`   📊 Progress: ${progress}% (${processedCount}/${stats.needsUpdate})`);
-      
-      // Add delay to be respectful to the server
-      if (processedCount < stats.needsUpdate) {
-        console.log('   ⏳ Waiting 2 seconds...');
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-    }
+    });
     
     // Final statistics
     console.log(`\n📊 Update Summary:`);
@@ -130,7 +139,7 @@ async function updateIdolDetails() {
     console.log(`   📈 Success rate: ${successRate}%`);
     
     if (stats.successful > 0) {
-      console.log(`\n🎉 Successfully enhanced ${stats.successful} idol profiles!`);
+      console.log(`\n🎉 Successfully enhanced ${stats.successful} idol profiles with ${concurrency}x concurrency!`);
     }
     
     // Show final database stats

@@ -41,9 +41,9 @@ async function main() {
     const scrapedUnits = await scraper.scrapeUnits(wikiUrl);
     console.log(`📋 Found ${scrapedUnits.length} units on the wiki page`);
     
-    // 🆕 Extract and scrape idol details from the songs
-    console.log('\n👥 Starting idol extraction and detailed scraping...');
-    const scrapedIdols = await scraper.scrapeIdolsFromSongs(scrapedSongs, true); // Enable detailed scraping
+    // 🆕 Extract and scrape idol details from the songs (concurrent)
+    console.log('\n👥 Starting concurrent idol extraction and detailed scraping...');
+    const scrapedIdols = await scraper.scrapeIdolsFromSongs(scrapedSongs, true, 5); // Enable detailed scraping with 5 concurrent
     console.log(`📋 Found ${scrapedIdols.length} idols, processed with detailed info`);
 
     // Process scraped songs with unit handling
