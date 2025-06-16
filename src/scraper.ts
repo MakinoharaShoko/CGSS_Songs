@@ -26,6 +26,20 @@ export interface ScrapedSong {
 
 export interface ScrapedIdol {
   name: string;
+  voiceActor?: string;
+  age?: number;
+  height?: string;
+  weight?: string;
+  birthday?: string;
+  bloodType?: string;
+  threeSizes?: string;
+  handedness?: string;
+  hobbies?: string;
+  horoscope?: string;
+  hometown?: string;
+  cardType?: string;
+  imageColor?: string;
+  idolUrl?: string;
 }
 
 export interface ScrapedUnit {
@@ -543,6 +557,171 @@ export class CGSSScraper {
     return [];
   }
 
+  // Scrape individual idol detail page for extended information
+  async scrapeIdolDetails(url: string): Promise<Partial<ScrapedIdol>> {
+    try {
+      console.log(`👤 Scraping idol details from: ${url}`);
+      const html = await this.fetchPage(url);
+      const $ = cheerio.load(html);
+      
+      const idolDetails: Partial<ScrapedIdol> = {};
+      
+      // Find the idol details table with width="100%" border="0" style="text-align:left;"
+      let detailsFound = false;
+      
+      $('table').each((tableIndex, table) => {
+        const $table = $(table);
+        
+        // Check table attributes to find the main info table
+        const tableWidth = $table.attr('width');
+        const tableBorder = $table.attr('border');
+        const tableStyle = $table.attr('style');
+        
+        if (tableWidth === '100%' && tableBorder === '0' && 
+            tableStyle && tableStyle.includes('text-align:left')) {
+          
+          console.log(`🔍 Found idol details table ${tableIndex}`);
+          detailsFound = true;
+          
+          // Parse each row in the table
+          $table.find('tr').each((rowIndex, row) => {
+            const $row = $(row);
+            const cells = $row.find('td');
+            
+            if (cells.length >= 2) {
+              const labelCell = $(cells[0]);
+              const valueCell = $(cells[1]);
+              
+              const label = labelCell.text().trim().toLowerCase().replace(/[:\s]/g, '');
+              const value = valueCell.text().trim();
+              
+              // Extract information based on labels
+              if (label.includes('name')) {
+                // Extract name from parentheses if present
+                const nameMatch = value.match(/^([^(]+)/);
+                if (nameMatch) {
+                  idolDetails.name = nameMatch[1].trim();
+                }
+              } else if (label.includes('voiceactor')) {
+                // Extract voice actor name from link or text
+                const voiceActorLink = valueCell.find('a').first();
+                if (voiceActorLink.length) {
+                  idolDetails.voiceActor = voiceActorLink.text().trim();
+                } else {
+                  // Parse from text like "青木瑠璃子 (Aoki Ruriko)"
+                  const vaMatch = value.match(/^([^(]+)/);
+                  if (vaMatch) {
+                    idolDetails.voiceActor = vaMatch[1].trim();
+                  }
+                }
+              } else if (label.includes('age')) {
+                const ageValue = parseInt(value, 10);
+                if (!isNaN(ageValue)) {
+                  idolDetails.age = ageValue;
+                }
+              } else if (label.includes('height')) {
+                idolDetails.height = value;
+              } else if (label.includes('weight')) {
+                idolDetails.weight = value;
+              } else if (label.includes('birthday')) {
+                idolDetails.birthday = value;
+              } else if (label.includes('bloodtype')) {
+                idolDetails.bloodType = value;
+              } else if (label.includes('threesizes')) {
+                idolDetails.threeSizes = value;
+              } else if (label.includes('handedness')) {
+                idolDetails.handedness = value;
+              } else if (label.includes('hobbies')) {
+                idolDetails.hobbies = value;
+              } else if (label.includes('horoscope')) {
+                idolDetails.horoscope = value;
+              } else if (label.includes('hometown')) {
+                idolDetails.hometown = value;
+              } else if (label.includes('cardtype')) {
+                // Extract card type from image alt text or surrounding text
+                const cardImg = valueCell.find('img');
+                if (cardImg.length) {
+                  const src = cardImg.attr('src') || '';
+                  if (src.includes('Cool')) {
+                    idolDetails.cardType = 'Cool';
+                  } else if (src.includes('Cute')) {
+                    idolDetails.cardType = 'Cute';
+                  } else if (src.includes('Passion')) {
+                    idolDetails.cardType = 'Passion';
+                  }
+                }
+              } else if (label.includes('imagecolor')) {
+                // Extract color from style attribute
+                const colorSpan = valueCell.find('span[style*="background-color"]');
+                if (colorSpan.length) {
+                  const style = colorSpan.attr('style') || '';
+                  const colorMatch = style.match(/background-color:\s*([^;]+)/);
+                  if (colorMatch) {
+                    idolDetails.imageColor = colorMatch[1].trim();
+                  }
+                }
+              }
+            }
+          });
+          
+          return false; // Break out of table loop once we found the details table
+        }
+      });
+      
+      if (detailsFound) {
+        console.log(`✅ Extracted idol details: ${Object.keys(idolDetails).length} fields`);
+        return idolDetails;
+      } else {
+        console.log(`⚠️ No idol details table found in: ${url}`);
+        return {};
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to scrape idol details from ${url}:`, error);
+      return {};
+    }
+  }
+
+  // Scrape idol from URL - handles both name formats and redirects
+  async scrapeIdolFromUrl(idolName: string): Promise<ScrapedIdol | null> {
+    try {
+      // Try different URL formats - spaces and underscores
+      const urlFormats = [
+        `${this.baseUrl}/${idolName.replace(/\s+/g, '_')}`,
+        `${this.baseUrl}/${idolName.replace(/\s+/g, '%20')}`,
+        `${this.baseUrl}/${idolName}`
+      ];
+      
+      for (const url of urlFormats) {
+        try {
+          console.log(`👤 Trying to scrape idol: ${idolName} from ${url}`);
+          const details = await this.scrapeIdolDetails(url);
+          
+          if (Object.keys(details).length > 0) {
+            const idol: ScrapedIdol = {
+              name: idolName,
+              ...details,
+              idolUrl: url
+            };
+            
+            console.log(`✅ Successfully scraped idol: ${idolName}`);
+            return idol;
+          }
+        } catch (error) {
+          console.log(`⚠️ Failed to fetch ${url}, trying next format...`);
+          continue;
+        }
+      }
+      
+      console.log(`❌ Could not scrape idol ${idolName} from any URL format`);
+      return null;
+      
+    } catch (error) {
+      console.error(`❌ Failed to scrape idol ${idolName}:`, error);
+      return null;
+    }
+  }
+
   // Scrape individual song detail page for extended information
   async scrapeSongDetails(url: string): Promise<Partial<ScrapedSong>> {
     try {
@@ -714,5 +893,91 @@ export class CGSSScraper {
     console.log(`  All songs saved to database: ✅`);
     
     return detailedSongs;
+  }
+
+  // Extract unique idol names from songs and optionally scrape their details
+  async scrapeIdolsFromSongs(songs: ScrapedSong[], scrapeDetails: boolean = false): Promise<ScrapedIdol[]> {
+    console.log(`👥 Extracting idols from ${songs.length} songs...`);
+    
+    // Collect all unique idol names
+    const idolNamesSet = new Set<string>();
+    
+    for (const song of songs) {
+      for (const idolName of song.idols) {
+        if (idolName && idolName.trim().length > 1) {
+          idolNamesSet.add(idolName.trim());
+        }
+      }
+    }
+    
+    const idolNames = Array.from(idolNamesSet);
+    console.log(`👥 Found ${idolNames.length} unique idols`);
+    
+    if (!scrapeDetails) {
+      // Save basic idol objects to database without detailed scraping
+      const basicIdols: ScrapedIdol[] = [];
+      for (const name of idolNames) {
+        const basicIdol = { name };
+        await this.db.createOrUpdateIdol(basicIdol);
+        basicIdols.push(basicIdol);
+      }
+      console.log(`📝 Saved ${basicIdols.length} basic idol records to database`);
+      return basicIdols;
+    }
+    
+    // Scrape detailed information for each idol
+    console.log(`🔍 Starting detailed scraping for ${idolNames.length} idols...`);
+    
+    const detailedIdols: ScrapedIdol[] = [];
+    let processedCount = 0;
+    
+    for (const idolName of idolNames) {
+      console.log(`\n👤 [${++processedCount}/${idolNames.length}] Processing: ${idolName}`);
+      
+      try {
+        const idol = await this.scrapeIdolFromUrl(idolName);
+        
+        if (idol) {
+          // Save to database immediately
+          await this.db.createOrUpdateIdol(idol);
+          detailedIdols.push(idol);
+          
+          // Log what details were found
+          const foundDetails = [];
+          if (idol.voiceActor) foundDetails.push(`VA: ${idol.voiceActor}`);
+          if (idol.age) foundDetails.push(`Age: ${idol.age}`);
+          if (idol.cardType) foundDetails.push(`Type: ${idol.cardType}`);
+          if (idol.hometown) foundDetails.push(`From: ${idol.hometown}`);
+          
+          if (foundDetails.length > 0) {
+            console.log(`  ✅ Details: ${foundDetails.join(', ')}`);
+          } else {
+            console.log(`  ⚠️ No additional details found`);
+          }
+        } else {
+          // Still add basic idol info even if detailed scraping failed
+          const basicIdol = { name: idolName };
+          await this.db.createOrUpdateIdol(basicIdol);
+          detailedIdols.push(basicIdol);
+          console.log(`  ❌ Detailed scraping failed, added basic info only`);
+        }
+        
+        // Add delay to be respectful to the server
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+      } catch (error) {
+        console.error(`❌ Failed to process idol ${idolName}: ${error}`);
+        // Add basic idol info as fallback
+        detailedIdols.push({ name: idolName });
+      }
+    }
+    
+    const totalWithDetails = detailedIdols.filter(i => i.voiceActor || i.age || i.cardType).length;
+    console.log(`\n📊 Idol processing complete:`);
+    console.log(`  Total idols processed: ${detailedIdols.length}`);
+    console.log(`  Idols with detailed info: ${totalWithDetails}`);
+    console.log(`  Basic info only: ${detailedIdols.length - totalWithDetails}`);
+    
+    return detailedIdols;
   }
 }

@@ -201,15 +201,57 @@ export class DatabaseService {
 
   async createOrUpdateIdol(idolData: ScrapedIdol): Promise<void> {
     try {
-      await prisma.idol.upsert({
+      const idol = await prisma.idol.upsert({
         where: { name: idolData.name },
-        update: {},
+        update: {
+          voiceActor: idolData.voiceActor,
+          age: idolData.age,
+          height: idolData.height,
+          weight: idolData.weight,
+          birthday: idolData.birthday,
+          bloodType: idolData.bloodType,
+          threeSizes: idolData.threeSizes,
+          handedness: idolData.handedness,
+          hobbies: idolData.hobbies,
+          horoscope: idolData.horoscope,
+          hometown: idolData.hometown,
+          cardType: idolData.cardType,
+          imageColor: idolData.imageColor,
+          idolUrl: idolData.idolUrl,
+        },
         create: {
           name: idolData.name,
+          voiceActor: idolData.voiceActor,
+          age: idolData.age,
+          height: idolData.height,
+          weight: idolData.weight,
+          birthday: idolData.birthday,
+          bloodType: idolData.bloodType,
+          threeSizes: idolData.threeSizes,
+          handedness: idolData.handedness,
+          hobbies: idolData.hobbies,
+          horoscope: idolData.horoscope,
+          hometown: idolData.hometown,
+          cardType: idolData.cardType,
+          imageColor: idolData.imageColor,
+          idolUrl: idolData.idolUrl,
         },
       });
 
-      console.log(`✅ Processed idol: ${idolData.name}`);
+      // Log detailed information about what was saved
+      const detailsLogged = [];
+      if (idolData.voiceActor) detailsLogged.push(`VA: ${idolData.voiceActor}`);
+      if (idolData.age) detailsLogged.push(`Age: ${idolData.age}`);
+      if (idolData.cardType) detailsLogged.push(`Type: ${idolData.cardType}`);
+      if (idolData.hometown) detailsLogged.push(`From: ${idolData.hometown}`);
+      if (idolData.hobbies) detailsLogged.push(`Hobbies: ${idolData.hobbies}`);
+
+      if (detailsLogged.length > 0) {
+        console.log(`✅ Saved idol with details: ${idolData.name}`);
+        console.log(`   📝 Details: ${detailsLogged.join(', ')}`);
+      } else {
+        console.log(`✅ Saved basic idol: ${idolData.name}`);
+      }
     } catch (error) {
       console.error(`❌ Failed to process idol ${idolData.name}:`, error);
       throw error;

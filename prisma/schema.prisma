@@ -45,6 +45,22 @@ model Idol {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
+  // Extended fields from idol detail pages
+  voiceActor    String? // Voice Actor
+  age           Int?    // Age
+  height        String? // Height (e.g., "152 cm")
+  weight        String? // Weight (e.g., "41 kg")
+  birthday      String? // Birthday (e.g., "June 30th")
+  bloodType     String? // Blood type (e.g., "A")
+  threeSizes    String? // Three sizes (e.g., "80-55-81 cm")
+  handedness    String? // Handedness (e.g., "Right")
+  hobbies       String? // Hobbies
+  horoscope     String? // Horoscope (e.g., "Cancer")
+  hometown      String? // Hometown
+  cardType      String? // Card Type (Cool, Cute, Passion)
+  imageColor    String? // Image Color (hex or color name)
+  idolUrl       String? // URL to the idol detail page
+  
   // Relations
   songIdols   SongIdol[]
   unitMembers UnitMember[]
