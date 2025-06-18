@@ -1,14 +1,26 @@
 import { createDbWorker } from 'sql.js-httpvfs'
 
-const workerUrl = '/sqlite.worker.js'
-const wasmUrl = '/sql-wasm.wasm'
+// Use absolute URLs for Cloudflare Pages compatibility
+const getBaseUrl = () => {
+  if (typeof window !== 'undefined') {
+    return window.location.origin
+  }
+  return ''
+}
+
+const workerUrl = `${getBaseUrl()}/sqlite.worker.js`
+const wasmUrl = `${getBaseUrl()}/sql-wasm.wasm`
 
 const dbConfig = {
   from: 'inline' as const,
   config: {
     serverMode: 'full' as const,
-    url: '/prisma/dev.db',
+    url: `${getBaseUrl()}/prisma/dev.db`,
     requestChunkSize: 4096,
+    // Add cache control for better performance on CF
+    requestHeaders: {
+      'Cache-Control': 'public, max-age=86400'
+    }
   },
 }
 
@@ -16,33 +28,56 @@ let worker: any = null
 
 export const initDatabase = async () => {
   if (!worker) {
-    worker = await createDbWorker(
-      [dbConfig],
-      workerUrl.toString(),
-      wasmUrl.toString()
-    )
+    try {
+      console.log('Initializing database with config:', {
+        workerUrl,
+        wasmUrl,
+        dbUrl: dbConfig.config.url
+      })
+      
+      worker = await createDbWorker(
+        [dbConfig],
+        workerUrl,
+        wasmUrl
+      )
+      
+      console.log('Database worker initialized successfully')
+    } catch (error) {
+      console.error('Failed to initialize database worker:', error)
+      throw new Error(`Database initialization failed: ${error}`)
+    }
   }
   return worker
 }
 
-export const getAllIdols = async () => {
-  const db = await initDatabase()
-  const result = await db.db.query(`
-    SELECT id, name, originalName
-    FROM idols
-    WHERE name IS NOT NULL 
-      AND name != ''
-      AND name NOT LIKE '%DJ%'
-      AND name NOT LIKE '%IDOLM@STER%'
-      AND name NOT LIKE '%Mixed by%'
-    ORDER BY name
-  `)
-  console.log(result)
-  return result.map((row: any) => ({
-    id: row.id,
-    name: row.name,
-    originalName: row.originalName,
-  }))
+export const getAllIdols = async (retries = 3) => {
+  try {
+    const db = await initDatabase()
+    const result = await db.db.query(`
+      SELECT id, name, originalName
+      FROM idols
+      WHERE name IS NOT NULL 
+        AND name != ''
+        AND name NOT LIKE '%DJ%'
+        AND name NOT LIKE '%IDOLM@STER%'
+        AND name NOT LIKE '%Mixed by%'
+      ORDER BY name
+    `)
+    console.log('Idols loaded:', result.length)
+    return result.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      originalName: row.originalName,
+    }))
+  } catch (error) {
+    console.error('Error loading idols:', error)
+    if (retries > 0) {
+      console.log(`Retrying... (${retries} attempts left)`)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      return getAllIdols(retries - 1)
+    }
+    throw new Error(`Failed to load idols after multiple attempts: ${error}`)
+  }
 }
 
 export const getSongPredictions = async (idolNames: string[], excludeTanaka: boolean = false) => {

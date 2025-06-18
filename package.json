@@ -14,7 +14,9 @@
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio",
     "web:dev": "tsx web/build.ts --dev",
-    "web:build": "tsx web/build.ts"
+    "web:build": "tsx web/build.ts",
+    "deploy:cf": "bash deploy-cf.sh",
+    "cf:build": "pnpm db:generate && pnpm web:build"
   },
   "dependencies": {
     "@mui/x-data-grid": "^8.5.2",

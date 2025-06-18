@@ -38,6 +38,15 @@ const build = async () => {
     './web/out/sql-wasm.wasm'
   )
 
+  // Copy headers file for Cloudflare Pages
+  await copyFile(
+    './_headers',
+    './web/out/_headers'
+  )
+
+  console.log('All files copied successfully')
+  console.log('Build completed for Cloudflare Pages deployment')
+
   const config: esbuild.BuildOptions = {
     entryPoints: ['web/src/index.tsx'],
     bundle: true,
