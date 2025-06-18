@@ -17,10 +17,6 @@ const dbConfig = {
     serverMode: 'full' as const,
     url: `${getBaseUrl()}/prisma/dev.db`,
     requestChunkSize: 4096,
-    // Add cache control for better performance on CF
-    requestHeaders: {
-      'Cache-Control': 'public, max-age=86400'
-    }
   },
 }
 
