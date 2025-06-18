@@ -21,7 +21,15 @@ if [ ! -f "web/out/index.html" ]; then
     exit 1
 fi
 
-# No longer checking for sql.js-httpvfs files as we use CDN WASM
+if [ ! -f "web/out/sql-wasm.js" ]; then
+    echo "❌ sql-wasm.js not found in build output"
+    exit 1
+fi
+
+if [ ! -f "web/out/sql-wasm.wasm" ]; then
+    echo "❌ sql-wasm.wasm not found in build output"
+    exit 1
+fi
 
 if [ ! -f "web/out/prisma/dev.db" ]; then
     echo "❌ Database file not found in build output"

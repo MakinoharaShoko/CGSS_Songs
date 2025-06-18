@@ -1,3 +1,11 @@
+/sql-wasm.js
+  Content-Type: application/javascript
+  Cache-Control: public, max-age=86400
+
+/sql-wasm.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=86400
+
 /prisma/dev.db
   Content-Type: application/octet-stream
   Cache-Control: public, max-age=3600 

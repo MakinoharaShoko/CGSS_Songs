@@ -28,7 +28,15 @@ const build = async () => {
     './web/out/index.html'
   )
 
-  // Note: No longer copying sql.js-httpvfs files as we're using CDN WASM
+  // Copy SQL.js files from local lib directory
+  await copyFile(
+    './web/lib/sql-wasm.js',
+    './web/out/sql-wasm.js'
+  )
+  await copyFile(
+    './web/lib/sql-wasm.wasm',
+    './web/out/sql-wasm.wasm'
+  )
 
   // Copy headers file for Cloudflare Pages
   await copyFile(

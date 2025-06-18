@@ -10,9 +10,9 @@ declare global {
 
 const loadSqlJs = async () => {
   if (typeof window.initSqlJs === 'undefined') {
-    // Load SQL.js from CDN
+    // Load SQL.js from local files
     const script = document.createElement('script')
-    script.src = 'https://sql.js.org/dist/sql-wasm.js'
+    script.src = `${window.location.origin}/sql-wasm.js`
     script.async = true
     
     return new Promise((resolve, reject) => {
@@ -34,8 +34,8 @@ export const initDatabase = async () => {
       
       if (!sqlJs) {
         sqlJs = await initSqlJs({
-          // Load WASM from CDN
-          locateFile: (file: string) => `https://sql.js.org/dist/${file}`
+          // Load WASM from local files
+          locateFile: (file: string) => `${window.location.origin}/${file}`
         })
         console.log('SQL.js initialized successfully')
       }
