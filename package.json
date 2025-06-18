@@ -19,6 +19,7 @@
     "cf:build": "pnpm db:generate && pnpm web:build"
   },
   "dependencies": {
+    "@mui/icons-material": "^7.1.1",
     "@mui/x-data-grid": "^8.5.2",
     "@prisma/client": "^5.10.0",
     "cheerio": "^1.0.0-rc.12",

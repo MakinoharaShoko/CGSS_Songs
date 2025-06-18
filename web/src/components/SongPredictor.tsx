@@ -8,8 +8,12 @@ import {
   Autocomplete,
   TextField,
   CircularProgress,
+  IconButton,
+  Collapse,
+  Chip,
 } from '@mui/material'
 import { DataGrid, GridColDef } from '@mui/x-data-grid'
+import { ExpandLess, ExpandMore } from '@mui/icons-material'
 import { getAllIdols, getSongPredictions } from '../services/database'
 
 interface Idol {
@@ -34,6 +38,7 @@ export const SongPredictor: React.FC = () => {
   const [excludeTanaka, setExcludeTanaka] = useState(false)
   const [predictions, setPredictions] = useState<SongPrediction[]>([])
   const [loading, setLoading] = useState(true)
+  const [expanded, setExpanded] = useState(true)
 
   useEffect(() => {
     const loadIdols = async () => {
@@ -119,46 +124,90 @@ export const SongPredictor: React.FC = () => {
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Paper sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          歌曲预测器
-        </Typography>
-        <Box sx={{ mb: 2 }}>
-          <Autocomplete
-            multiple
-            options={idols}
-            getOptionLabel={(idol) => `${idol.name} (${idol.originalName || '无日文名'})`}
-            value={selectedIdols}
-            onChange={(_, newValue) => setSelectedIdols(newValue)}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="选择偶像"
-                placeholder="开始输入以搜索..."
-              />
+      <Paper sx={{ p: 0 }}>
+        <Box 
+          className="collapsible-header"
+          sx={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'space-between',
+            p: 2,
+            pb: expanded ? 1 : 2,
+            cursor: 'pointer',
+            borderRadius: 1,
+          }}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="h6">
+              选择偶像 {selectedIdols.length > 0 && `(${selectedIdols.length})`}
+            </Typography>
+            {!expanded && selectedIdols.length > 0 && (
+              <Box className="collapsed-chips" sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                {selectedIdols.slice(0, 3).map((idol) => (
+                  <Chip 
+                    key={idol.id} 
+                    label={idol.name}
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                  />
+                ))}
+                {selectedIdols.length > 3 && (
+                  <Chip 
+                    label={`+${selectedIdols.length - 3}`}
+                    size="small"
+                    variant="outlined"
+                    color="secondary"
+                  />
+                )}
+              </Box>
             )}
-            loading={loading}
-            sx={{ mb: 2 }}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={excludeTanaka}
-                onChange={(e) => setExcludeTanaka(e.target.checked)}
-              />
-            }
-            label="排除田中秀和作词作曲的歌曲"
-          />
+          </Box>
+          <IconButton size="small">
+            {expanded ? <ExpandLess /> : <ExpandMore />}
+          </IconButton>
         </Box>
+        
+        <Collapse in={expanded}>
+          <Box sx={{ px: 2, pb: 2 }}>
+            <Autocomplete
+              multiple
+              options={idols}
+              getOptionLabel={(idol) => `${idol.name} (${idol.originalName || '无日文名'})`}
+              value={selectedIdols}
+              onChange={(_, newValue) => setSelectedIdols(newValue)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="选择偶像"
+                  placeholder="开始输入以搜索..."
+                />
+              )}
+              loading={loading}
+              sx={{ mb: 2 }}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={excludeTanaka}
+                  onChange={(e) => setExcludeTanaka(e.target.checked)}
+                />
+              }
+              label="排除田中秀和作词作曲的歌曲"
+            />
+          </Box>
+        </Collapse>
       </Paper>
       
-      <Paper sx={{ flexGrow: 1, height: 400 }}>
+      <Paper sx={{ flexGrow: 1, minHeight: 0 }}>
         <DataGrid
           rows={predictions}
           columns={columns}
           loading={loading}
           disableRowSelectionOnClick
           sx={{
+            border: 'none',
             '& .MuiDataGrid-cell': {
               whiteSpace: 'normal',
               lineHeight: 'normal',
