@@ -1,19 +1,17 @@
--- 最终版查询：用于分析歌曲可演唱性，已完美处理组合关系
 WITH InputIdols AS (
-    -- 步骤 1: 定义我们关心的偶像列表
+    -- 步骤 1: 定义我们关心的偶像列表 (无变化)
     SELECT id
     FROM idols
     WHERE name IN (
                    'Chitose Kurosaki', 'Chiyo Shirayuki', 'Miho Kohinata', 'Yuuki Otokura',
                    'Rin Shibuya', 'Koume Shirasaka', 'Tamami Wakiyama', 'Hajime Fujiwara',
                    'Ryo Matsunaga', 'Mizuki Kawashima', 'Hayate Hisakawa', 'Miyu Mifune',
-                   'Hino Akane', 'Nanjo Hikaru', 'Hori Yuko', 'Yoda Yoshino',
+                   'Hino Akane', 'Nanjo Hikaru', 'Hori Yuko', 'Yoshino Yorita',
                    'Nagi Hisakawa', 'Emi Namba', 'Reina Koseki', 'Syoko Hoshi'
         )
 ),
      AllSongPerformers AS (
-         -- 步骤 2: 构建权威的演唱者列表 (已正确区分组合曲与非组合曲)
-         -- 来源 1: 组合曲
+         -- 步骤 2: 构建权威的演唱者列表 (无变化)
          SELECT
              s.id AS songId, um.idolId, i.originalName
          FROM songs AS s
@@ -21,7 +19,6 @@ WITH InputIdols AS (
                   JOIN idols AS i ON um.idolId = i.id
          WHERE s.unitId IS NOT NULL
          UNION ALL
-         -- 来源 2: 非组合曲
          SELECT
              si.songId, si.idolId, i.originalName
          FROM song_idols AS si
@@ -30,7 +27,7 @@ WITH InputIdols AS (
          WHERE s.unitId IS NULL
      ),
      SongStats AS (
-         -- 步骤 3: 计算统计数据
+         -- 步骤 3: 计算统计数据 (无变化)
          SELECT
              p.songId,
              COUNT(p.idolId) AS total_idol_count,
@@ -40,7 +37,7 @@ WITH InputIdols AS (
          GROUP BY p.songId
      ),
      PerformerOriginalNames AS (
-         -- 步骤 4: 拼接日文名
+         -- 步骤 4: 拼接日文名 (无变化)
          SELECT
              songId,
              GROUP_CONCAT(originalName, ', ') AS all_performers_original_names
@@ -61,7 +58,16 @@ SELECT
 FROM SongStats AS ss
          JOIN songs AS s ON ss.songId = s.id
          JOIN PerformerOriginalNames AS pon ON ss.songId = pon.songId
-WHERE ss.present_idol_count > 0
+
+-- [修改部分] 在 WHERE 子句中增加排除条件
+WHERE
+    ss.present_idol_count > 0
+  -- 排除作曲中包含 "Hidekazu Tanaka" 的歌曲
+  AND COALESCE(s.composer, '') NOT LIKE '%Hidekazu Tanaka%'
+  -- 排除作词中包含 "Hidekazu Tanaka" 的歌曲
+  AND COALESCE(s.lyricist, '') NOT LIKE '%Hidekazu Tanaka%'
+
+-- 排序逻辑保持不变
 ORDER BY
     "出场率" DESC,
     "原配人数" DESC;

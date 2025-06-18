@@ -12,21 +12,41 @@
     "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",
     "db:migrate": "npx prisma migrate dev",
-    "db:studio": "npx prisma studio"
+    "db:studio": "npx prisma studio",
+    "web:dev": "tsx web/build.ts --dev",
+    "web:build": "tsx web/build.ts"
   },
   "dependencies": {
+    "@mui/x-data-grid": "^8.5.2",
     "@prisma/client": "^5.10.0",
     "cheerio": "^1.0.0-rc.12",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "sql.js-httpvfs": "^0.8.12"
   },
   "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/material": "^7.1.1",
     "@types/node": "^20.11.0",
     "@types/node-fetch": "^2.6.11",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "esbuild": "^0.25.5",
+    "esbuild-sass-plugin": "^3.3.1",
     "prisma": "^5.10.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "sass": "^1.89.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0"
   },
-  "keywords": ["idolmaster", "cgss", "prisma", "sqlite", "scraper"],
+  "keywords": [
+    "idolmaster",
+    "cgss",
+    "prisma",
+    "sqlite",
+    "scraper"
+  ],
   "author": "",
   "license": "MIT"
-} 
+}
