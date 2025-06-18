@@ -95,7 +95,7 @@ export const SongPredictor: React.FC = () => {
       headerName: '匹配率',
       type: 'number',
       width: 100,
-      valueFormatter: (params) => `${params.value}%`,
+      valueFormatter: (params) => `${params}%`,
     },
     {
       field: 'presentCount',

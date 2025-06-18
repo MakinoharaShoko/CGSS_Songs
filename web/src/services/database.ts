@@ -130,7 +130,7 @@ ORDER BY
   return result.map((row: any) => ({
     songName: row["歌曲日文名"],
     performers: row["原唱偶像列表"],
-    matchRate: (row["出场率"] * 100).toFixed(0), // Convert to percentage
+    matchRate: Math.round((row["出场率"] || 0) * 100), // Convert to percentage
     presentCount: row["出演人数"],
     totalCount: row["原配人数"],
     missingCount: row["缺席人数"],
