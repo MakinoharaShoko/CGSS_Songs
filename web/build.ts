@@ -28,15 +28,7 @@ const build = async () => {
     './web/out/index.html'
   )
 
-  // Copy sql.js-httpvfs files
-  await copyFile(
-    './node_modules/sql.js-httpvfs/dist/sqlite.worker.js',
-    './web/out/sqlite.worker.js'
-  )
-  await copyFile(
-    './node_modules/sql.js-httpvfs/dist/sql-wasm.wasm',
-    './web/out/sql-wasm.wasm'
-  )
+  // Note: No longer copying sql.js-httpvfs files as we're using CDN WASM
 
   // Copy headers file for Cloudflare Pages
   await copyFile(
@@ -54,6 +46,7 @@ const build = async () => {
     sourcemap: isDev,
     minify: !isDev,
     target: ['chrome90', 'firefox88', 'safari14', 'edge90'],
+    platform: 'browser',
     loader: {
       '.png': 'file',
       '.svg': 'file',
@@ -64,7 +57,19 @@ const build = async () => {
       sassPlugin()
     ],
     define: {
-      'process.env.NODE_ENV': isDev ? '"development"' : '"production"'
+      'process.env.NODE_ENV': isDev ? '"development"' : '"production"',
+      'global': 'globalThis'
+    },
+    external: [],
+    // Polyfill Node.js modules for browser
+    inject: [],
+    // Handle Node.js globals
+    banner: {
+      js: `
+        if (typeof global === 'undefined') {
+          var global = globalThis;
+        }
+      `
     }
   }
 

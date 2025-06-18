@@ -1,13 +1,3 @@
-/*
-  X-Frame-Options: DENY
-  X-Content-Type-Options: nosniff
-
-/sqlite.worker.js
-  Content-Type: application/javascript
-
-/sql-wasm.wasm
-  Content-Type: application/wasm
-
-/prisma/*
+/prisma/dev.db
   Content-Type: application/octet-stream
-  Cache-Control: public, max-age=86400 
+  Cache-Control: public, max-age=3600 

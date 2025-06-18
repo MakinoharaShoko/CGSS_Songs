@@ -1,55 +1,74 @@
-import { createDbWorker } from 'sql.js-httpvfs'
+// Use SQL.js from CDN to avoid bundling issues
+let db: any = null
+let sqlJs: any = null
 
-// Use absolute URLs for Cloudflare Pages compatibility
-const getBaseUrl = () => {
-  if (typeof window !== 'undefined') {
-    return window.location.origin
+declare global {
+  interface Window {
+    initSqlJs: any
   }
-  return ''
 }
 
-const workerUrl = `${getBaseUrl()}/sqlite.worker.js`
-const wasmUrl = `${getBaseUrl()}/sql-wasm.wasm`
-
-const dbConfig = {
-  from: 'inline' as const,
-  config: {
-    serverMode: 'full' as const,
-    url: `${getBaseUrl()}/prisma/dev.db`,
-    requestChunkSize: 4096,
-  },
+const loadSqlJs = async () => {
+  if (typeof window.initSqlJs === 'undefined') {
+    // Load SQL.js from CDN
+    const script = document.createElement('script')
+    script.src = 'https://sql.js.org/dist/sql-wasm.js'
+    script.async = true
+    
+    return new Promise((resolve, reject) => {
+      script.onload = () => resolve(window.initSqlJs)
+      script.onerror = reject
+      document.head.appendChild(script)
+    })
+  }
+  return window.initSqlJs
 }
-
-let worker: any = null
 
 export const initDatabase = async () => {
-  if (!worker) {
+  if (!db) {
     try {
-      console.log('Initializing database with config:', {
-        workerUrl,
-        wasmUrl,
-        dbUrl: dbConfig.config.url
-      })
+      console.log('Loading SQL.js from CDN...')
       
-      worker = await createDbWorker(
-        [dbConfig],
-        workerUrl,
-        wasmUrl
-      )
+      // Load SQL.js dynamically
+      const initSqlJs = await loadSqlJs()
       
-      console.log('Database worker initialized successfully')
+      if (!sqlJs) {
+        sqlJs = await initSqlJs({
+          // Load WASM from CDN
+          locateFile: (file: string) => `https://sql.js.org/dist/${file}`
+        })
+        console.log('SQL.js initialized successfully')
+      }
+
+      // Fetch database file
+      console.log('Fetching database file...')
+      const dbUrl = `${window.location.origin}/prisma/dev.db`
+      const response = await fetch(dbUrl)
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch database: ${response.status} ${response.statusText}`)
+      }
+      
+      const dbArrayBuffer = await response.arrayBuffer()
+      const dbUint8Array = new Uint8Array(dbArrayBuffer)
+      
+      console.log(`Database loaded: ${dbUint8Array.length} bytes`)
+      
+      // Create database instance
+      db = new sqlJs.Database(dbUint8Array)
+      console.log('Database initialized successfully')
     } catch (error) {
-      console.error('Failed to initialize database worker:', error)
+      console.error('Failed to initialize database:', error)
       throw new Error(`Database initialization failed: ${error}`)
     }
   }
-  return worker
+  return db
 }
 
 export const getAllIdols = async (retries = 3) => {
   try {
-    const db = await initDatabase()
-    const result = await db.db.query(`
+    const database = await initDatabase()
+    const stmt = database.prepare(`
       SELECT id, name, originalName
       FROM idols
       WHERE name IS NOT NULL 
@@ -59,12 +78,20 @@ export const getAllIdols = async (retries = 3) => {
         AND name NOT LIKE '%Mixed by%'
       ORDER BY name
     `)
+    
+    const result: Array<{id: number, name: string, originalName: string}> = []
+    while (stmt.step()) {
+      const row = stmt.getAsObject()
+      result.push({
+        id: row.id as number,
+        name: row.name as string,
+        originalName: row.originalName as string,
+      })
+    }
+    stmt.free()
+    
     console.log('Idols loaded:', result.length)
-    return result.map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      originalName: row.originalName,
-    }))
+    return result
   } catch (error) {
     console.error('Error loading idols:', error)
     if (retries > 0) {
@@ -77,10 +104,10 @@ export const getAllIdols = async (retries = 3) => {
 }
 
 export const getSongPredictions = async (idolNames: string[], excludeTanaka: boolean = false) => {
-  const db = await initDatabase()
+  const database = await initDatabase()
   
   // Convert idol names array to SQL string
-  const idolNamesStr = idolNames.map(name => `'${name}'`).join(', ')
+  const idolNamesStr = idolNames.map(name => `'${name.replace(/'/g, "''")}'`).join(', ')
   
   // Add Tanaka exclusion if needed
   const tanakaFilter = excludeTanaka ? `
@@ -156,14 +183,29 @@ ORDER BY
     "原配人数" DESC;
   `
   
-  const result = await db.db.query(query)
-  console.log(result)
-  return result.map((row: any) => ({
-    songName: row["歌曲日文名"],
-    performers: row["原唱偶像列表"],
-    matchRate: Math.round((row["出场率"] || 0) * 100), // Convert to percentage
-    presentCount: row["出演人数"],
-    totalCount: row["原配人数"],
-    missingCount: row["缺席人数"],
-  }))
+  const stmt = database.prepare(query)
+  const result: Array<{
+    songName: string,
+    performers: string,
+    matchRate: number,
+    presentCount: number,
+    totalCount: number,
+    missingCount: number
+  }> = []
+  
+  while (stmt.step()) {
+    const row = stmt.getAsObject()
+    result.push({
+      songName: row["歌曲日文名"] as string,
+      performers: row["原唱偶像列表"] as string,
+      matchRate: Math.round(((row["出场率"] as number) || 0) * 100), // Convert to percentage
+      presentCount: row["出演人数"] as number,
+      totalCount: row["原配人数"] as number,
+      missingCount: row["缺席人数"] as number,
+    })
+  }
+  stmt.free()
+  
+  console.log('Song predictions loaded:', result.length)
+  return result
 } 
